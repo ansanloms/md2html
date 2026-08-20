@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/denoland/deno/refs/heads/main/cli/schemas/config-file.v1.json",
+  "fmt": {
+    "proseWrap": "preserve"
+  },
+  "lint": {
+    "rules": {
+      "tags": [
+        "recommended"
+      ]
+    },
+    "plugins": [
+      "jsr:@aireone/deno-lint-curly"
+    ]
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@1.0.19",
+    "@std/cli": "jsr:@std/cli@1.0.32",
+    "@std/encoding": "jsr:@std/encoding@1.0.11",
+    "@std/path": "jsr:@std/path@1.1.6",
+    "unified": "npm:unified@11.0.5",
+    "remark-parse": "npm:remark-parse@11.0.0",
+    "remark-gfm": "npm:remark-gfm@4.0.1",
+    "remark-rehype": "npm:remark-rehype@11.1.2",
+    "rehype-raw": "npm:rehype-raw@7.0.0",
+    "rehype-stringify": "npm:rehype-stringify@10.0.1",
+    "@shikijs/rehype": "npm:@shikijs/rehype@4.3.1",
+    "unist-util-visit": "npm:unist-util-visit@5.1.0",
+    "rehype-github-alerts": "npm:rehype-github-alerts@4.2.0"
+  },
+  "tasks": {
+    "lint": "deno lint && deno fmt --check",
+    "fix": "deno lint --fix && deno fmt",
+    "check": "deno check md2html.ts lib/*.ts",
+    "test": "deno test --allow-read --allow-write --allow-net --allow-env=VSCODE_TEXTMATE_DEBUG lib/",
+    "build": "deno bundle -o dist/md2html md2html.ts && chmod +x dist/md2html"
+  }
+}
