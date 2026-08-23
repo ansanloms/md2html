@@ -9,7 +9,10 @@ import markdownThemeCssRaw from "./assets/markdown-theme.css" with {
 import codeCopyJsRaw from "./assets/code-copy.js" with {
   type: "text",
 };
-import mermaidZoomJsRaw from "./assets/mermaid-zoom.js" with {
+import mermaidRenderJsRaw from "./assets/mermaid-render.js" with {
+  type: "text",
+};
+import zoomJsRaw from "./assets/zoom.js" with {
   type: "text",
 };
 
@@ -19,5 +22,8 @@ export const MARKDOWN_THEME_CSS = markdownThemeCssRaw;
 /** コードブロックのコピー・ボタンを扱う JS。 */
 export const CODE_COPY_JS = codeCopyJsRaw;
 
-/** mermaid の render + パン・ズーム DOM 構築を行うクライアント JS (mermaid bundle の entry から import される)。 */
-export const MERMAID_ZOOM_JS = mermaidZoomJsRaw;
+/** mermaid の render と静的な figure.mermaid-fig 構築を行うクライアント JS (mermaid bundle の entry から import される)。 */
+export const MERMAID_RENDER_JS = mermaidRenderJsRaw;
+
+/** クリックした要素をモーダル (dialog.zoom-dialog) で表示しパン・ズームするクライアント JS。HTML に直接埋め込む。 */
+export const ZOOM_JS = zoomJsRaw;

@@ -8,7 +8,8 @@
 //   --title   HTML の <title>。省略時は frontmatter の title、それも無ければ入力ファイル名。
 //
 // 入力 markdown 先頭の YAML frontmatter (lib/frontmatter.ts) を解釈し、title と
-// description を出力 HTML のメタ情報へ反映する。frontmatter ブロックは本文から除く。
+// description を出力 HTML のメタ情報へ、md2html.zoomTargets をモーダル拡大表示の
+// 対象へ反映する (未指定なら既定で画像が対象)。frontmatter ブロックは本文から除く。
 //
 // mermaid は npm:mermaid を import する browser 向けエントリ TS を子プロセスの
 // `deno bundle` でバンドルし、初回のみ ~/.cache/md2html/ (または

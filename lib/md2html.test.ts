@@ -391,3 +391,118 @@ Deno.test("TOC に可視ラベルが出ない", async () => {
   assertEquals(html.includes("toc-title"), false);
   assertStringIncludes(html, '<aside class="toc" aria-label="目次">');
 });
+
+Deno.test("ZOOM_JS は mermaid ブロックがあるとき注入され、既定の zoomTargets (img) の JSON が出る", async () => {
+  const html = await convert(
+    "```mermaid\ngraph TD\n  A --> B\n```\n",
+    baseOptions(),
+  );
+  assertStringIncludes(html, 'const TARGETS_ID = "md2html-zoom-targets";');
+  assertStringIncludes(
+    html,
+    '<script type="application/json" id="md2html-zoom-targets">["img"]</script>',
+  );
+  // zoom.js は mermaid bundle より前に置かれる。
+  const zoomIndex = html.indexOf(
+    'const TARGETS_ID = "md2html-zoom-targets";',
+  );
+  const mermaidIndex = html.indexOf("/* mermaid stub */");
+  assertEquals(zoomIndex !== -1 && zoomIndex < mermaidIndex, true);
+});
+
+Deno.test("ZOOM_JS と zoomTargets の JSON は frontmatter に zoomTargets があるとき注入される", async () => {
+  const html = await convert(
+    "# h\n\n![a](https://example.com/a.png)\n",
+    baseOptions({
+      frontmatter: { md2html: { zoomTargets: ["img", "table"] } },
+    }),
+  );
+  assertStringIncludes(
+    html,
+    '<script type="application/json" id="md2html-zoom-targets">["img","table"]</script>',
+  );
+  assertStringIncludes(html, 'const TARGETS_ID = "md2html-zoom-targets";');
+  // JSON ブロックは zoom.js より前に置かれる。
+  assertEquals(
+    html.indexOf(
+      '<script type="application/json" id="md2html-zoom-targets">',
+    ) < html.indexOf('const TARGETS_ID = "md2html-zoom-targets";'),
+    true,
+  );
+});
+
+Deno.test("zoomTargets の JSON は < > & をエスケープし script を早期終了させない", async () => {
+  const html = await convert(
+    "# h\n",
+    baseOptions({
+      frontmatter: { md2html: { zoomTargets: ["</script><b>&"] } },
+    }),
+  );
+  assertStringIncludes(
+    html,
+    'id="md2html-zoom-targets">["\\u003c/script\\u003e\\u003cb\\u003e\\u0026"]</script>',
+  );
+  assertEquals(html.includes("</script><b>"), false);
+});
+
+Deno.test("mermaid も画像も無く zoomTargets の指定も無ければ ZOOM_JS は注入されない", async () => {
+  const html = await convert("# h\n\n本文\n", baseOptions());
+  assertEquals(
+    html.includes('const TARGETS_ID = "md2html-zoom-targets";'),
+    false,
+  );
+  assertEquals(
+    html.includes(
+      '<script type="application/json" id="md2html-zoom-targets">',
+    ),
+    false,
+  );
+});
+
+Deno.test("画像があれば既定の zoomTargets (img) で ZOOM_JS と JSON が注入される", async () => {
+  const html = await convert(
+    "# h\n\n![a](https://example.com/a.png)\n",
+    baseOptions(),
+  );
+  assertStringIncludes(html, 'const TARGETS_ID = "md2html-zoom-targets";');
+  assertStringIncludes(
+    html,
+    '<script type="application/json" id="md2html-zoom-targets">["img"]</script>',
+  );
+});
+
+Deno.test("画像がプレースホルダに置換された場合は既定の zoomTargets では注入されない", async () => {
+  const html = await convert(
+    "# h\n\n![a](./missing.png)\n",
+    baseOptions({ resolveImage: () => Promise.resolve(null) }),
+  );
+  assertEquals(
+    html.includes('const TARGETS_ID = "md2html-zoom-targets";'),
+    false,
+  );
+});
+
+Deno.test("zoomTargets に空配列を明示すると mermaid があっても JSON は出ない (mermaid のみ対象)", async () => {
+  const html = await convert(
+    "```mermaid\ngraph TD\n  A --> B\n```\n\n![a](https://example.com/a.png)\n",
+    baseOptions({ frontmatter: { md2html: { zoomTargets: [] } } }),
+  );
+  assertStringIncludes(html, 'const TARGETS_ID = "md2html-zoom-targets";');
+  assertEquals(
+    html.includes(
+      '<script type="application/json" id="md2html-zoom-targets">',
+    ),
+    false,
+  );
+});
+
+Deno.test("zoomTargets に空配列を明示し mermaid も無ければ ZOOM_JS は注入されない", async () => {
+  const html = await convert(
+    "# h\n\n![a](https://example.com/a.png)\n",
+    baseOptions({ frontmatter: { md2html: { zoomTargets: [] } } }),
+  );
+  assertEquals(
+    html.includes('const TARGETS_ID = "md2html-zoom-targets";'),
+    false,
+  );
+});
