@@ -4,11 +4,12 @@ markdown ファイルをシンタックスハイライト・mermaid 図・目次
 
 ## コマンド
 
-- `md2html [<input.md>] [--output <path>] [--css <path>] [--title <title>]`
+- `md2html [<input.md>] [--output <path>] [--css <path>] [--title <title>] [--lang <lang>]`
   - `<input.md>` - 入力 markdown ファイル。省略するか `-` を指定すると stdin から読む（例: `cat foo.md | md2html - --output foo.html`）。指定できるのは 1 つまでで、2 つ以上あるとエラーになる。
   - `--output` - 出力先パス。省略時は変換結果を stdout へ出す。
   - `--css` - 追記するユーザ CSS ファイルのパス。組み込みテーマ CSS の後に連結される。
   - `--title` - 出力 HTML の `<title>`。省略時は frontmatter の `title`、それも無ければ入力ファイル名（stdin から読む場合は `md2html`）を使う。
+  - `--lang` - 出力 HTML の `<html lang>`。省略時は frontmatter の `lang`、それも無ければ `ja` を使う。
   - `--help` - 使い方を表示する。
   - `--version` - バージョンを表示する。
 
@@ -36,7 +37,7 @@ CLI にテーマ・目次・mermaid ズームを切り替えるオプション�
 - mermaid コードブロックは `pre.mermaid` へ変換し、mermaid 本体（npm パッケージをブラウザ向けにバンドルしたもの）と描画スクリプト（`lib/assets/mermaid-render.js`）を出力 HTML に埋め込む。描画結果は本文幅に収まる静的な図（`figure.mermaid-fig`、ホバーで「拡大」バッジを表示）として表示し、クリック（または Enter / Space）でモーダル表示に切り替わる。mermaid のブラウザ向け bundle は初回のみ `deno bundle` で生成し、`$XDG_CACHE_HOME/md2html`（無ければ `~/.cache/md2html`）へキャッシュする。以降はキャッシュを読むだけなので、mermaid ブロックが無い変換や 2 回目以降の変換はネットワーク・`deno bundle` 実行を必要としない。
 - モーダル表示（`lib/assets/zoom.js`）は `<dialog class="zoom-dialog">` 要素で実装し、モーダル内でドラッグによる移動・ホイールによる拡大縮小・ボタン操作（閉じる / 拡大 / 縮小 / 全体表示）・ダブルクリックでの全体表示ができる。Esc キー・背景クリック・閉じるボタンで閉じる。右下に対象のキャプション（mermaid 図は「図」、画像は `alt`）を表示する。色はテーマ CSS の変数を参照するため `prefers-color-scheme` に追従する。対象は既定で mermaid 図と画像（`img`）。frontmatter の `md2html.zoomTargets` に CSS セレクタの配列を書くと既定を置き換えて任意の要素（例: `table`）を対象にでき、`zoomTargets: []` と書けば画像を外して mermaid 図のみにできる（mermaid 図は指定によらず常に対象）。マッチした要素のうち `img` は `span.img-zoom` で包んで「拡大」バッジを付け、それ以外は `zoom-target` クラスを付ける。mermaid 図と画像はクリックのほか Enter / Space でも開けるが、`zoom-target` クラスを付けた要素はクリック（マウス操作）のみで開く。いずれもクリックでモーダル表示し（要素は複製して表示する）、リンク（`a[href]`）の中にある要素はリンクの動作を優先して対象外とする。解釈できないセレクタはブラウザのコンソールに警告を出して無視する。対象の内側にあるリンクをクリックした場合や、表のテキストをドラッグ選択した直後の click ではモーダルを開かない。
 - ローカル画像（`http(s):` / `data:` 以外の `img` の `src`）は入力ファイルのディレクトリ基準で読み込み（見つからなければ cwd 基準）、data URI に埋め込む。対応拡張子は png / jpg / jpeg / gif / svg / webp / avif / bmp / ico で、クエリ・fragment は無視する。読み込めない場合は代替テキスト付きのプレースホルダ要素に置き換える。
-- 入力 markdown 先頭の YAML frontmatter を解釈し、`title` を `<title>` に（優先順位は `--title` > frontmatter `title` > 入力ファイル名）、`description` を `<meta name="description">` に反映する。frontmatter ブロック自体は本文としてレンダリングしない。frontmatter が無い・空の場合は従来どおり動作する。値は書かれたとおりの文字列として扱い（YAML の数値・日付変換は行わない）、空文字列は未指定とみなす。`md2html.zoomTargets`（文字列の配列）はモーダル拡大表示の対象セレクタとして扱い（未指定なら既定の `["img"]`、空配列なら画像を外す）、非文字列・空文字列の要素は無視する。
+- 入力 markdown 先頭の YAML frontmatter を解釈し、`title` を `<title>` に（優先順位は `--title` > frontmatter `title` > 入力ファイル名）、`description` を `<meta name="description">` に、`lang` を `<html lang>` に（優先順位は `--lang` > frontmatter `lang` > `ja`）反映する。frontmatter ブロック自体は本文としてレンダリングしない。frontmatter が無い・空の場合は従来どおり動作する。値は書かれたとおりの文字列として扱い（YAML の数値・日付変換は行わない）、空文字列は未指定とみなす。`md2html.zoomTargets`（文字列の配列）はモーダル拡大表示の対象セレクタとして扱い（未指定なら既定の `["img"]`、空配列なら画像を外す）、非文字列・空文字列の要素は無視する。`md2html` 名前空間の指定が不正な場合（マッピングでない、`zoomTargets` が配列でない、要素が除外された）は標準エラー出力へ警告を出したうえで無視する。
 
 入力 markdown は信頼できるものとして扱う。markdown 中に直接書かれた raw HTML（`<script>` を含む）は `rehype-raw` と `allowDangerousHtml` によりサニタイズされずそのまま出力 HTML へ通す。信頼できない markdown を変換して第三者へ配布する用途は想定していない。
 
@@ -46,7 +47,7 @@ CLI にテーマ・目次・mermaid ズームを切り替えるオプション�
 
 - `md2html.ts` - CLI 本体。引数パース、入力/CSS ファイルの読み込み、frontmatter の解釈（`parseFrontmatter`）と `<title>` の決定、ローカル画像の解決（`resolveImage`）、mermaid bundle の取得（`getMermaidJs`、キャッシュ経由）を組み立てて `lib/convert.ts` の `convert()` へ渡す。
 - `lib/convert.ts` - 変換の中心ロジック。unified（remark-parse → remark-gfm → remark-rehype → rehype-raw）で markdown を hast に変換した後、mermaid ブロックの退避・shiki ハイライト（`@shikijs/rehype`）・見出し id/TOC 付与・コードブロックのラップ・テーブルのラップ・ローカル画像のインライン化・rehype-stringify を経て、テーマ CSS やスクリプトを埋め込んだ 1 枚の HTML 文字列を組み立てる。
-- `lib/frontmatter.ts` - YAML frontmatter の解釈（`@std/front-matter` で分離し、`@std/yaml` の failsafe スキーマで解析）。frontmatter ブロックを本文から切り離し、`title` / `description` / `md2html.zoomTargets` を型付きで返す。CLI がこれを呼び、本文と解釈結果を `convert()` へ渡す。
+- `lib/frontmatter.ts` - YAML frontmatter の解釈（`@std/front-matter` で分離し、`@std/yaml` の failsafe スキーマで解析）。frontmatter ブロックを本文から切り離し、`title` / `description` / `lang` / `md2html.zoomTargets` を型付きで返す。不正な `md2html` 指定は警告文（`warnings`）として返し、CLI が stderr へ出す。CLI がこれを呼び、本文と解釈結果を `convert()` へ渡す。
 - `lib/mermaid.ts` - mermaid のブラウザ向け bundle 取得ロジック。bundle 対象（エントリ TS + `mermaid-render.js`）の内容から revision ハッシュを作ってキャッシュキーとし、キャッシュがあれば読み、無ければ一時ディレクトリにエントリを書いて `deno bundle`（呼び出し側から注入）を実行し、結果をキャッシュへ保存する。
 - `lib/assets.ts` - `lib/assets/` 配下の CSS / JS を `with { type: "text" }` のテキスト import で取り込み、文字列定数として export するアグリゲータ。
 - `lib/assets/markdown-theme.css` - 自己完結テーマ CSS。light/dark は `prefers-color-scheme` を直接参照する。

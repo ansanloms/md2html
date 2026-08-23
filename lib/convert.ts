@@ -20,6 +20,82 @@ export interface ResolvedImage {
   data: Uint8Array;
 }
 
+/**
+ * 出力 HTML に埋め込む UI 文言。既定は日本語 (DEFAULT_LABELS)。
+ * `{name}` を含む値は、対象の名前 (画像の alt・モーダルのキャプション) に置換する。
+ * zoom.js が使う文言は JSON ブロック経由でクライアントへ渡す (ZOOM_LABEL_KEYS)。
+ */
+export interface Labels {
+  /** コードブロックのコピーボタンのラベル。 */
+  copy: string;
+  /** 目次 (aside.toc) の aria-label。 */
+  toc: string;
+  /** alt の無い画像の既定名。プレースホルダと拡大表示のラベルで使う。 */
+  image: string;
+  /** 読み込めなかった画像のプレースホルダ文言。`{name}` は alt (無ければ image)。 */
+  imagePlaceholder: string;
+  /** mermaid 図のモーダルキャプション。 */
+  figure: string;
+  /** モーダル拡大の対象に付くバッジの文言。 */
+  zoomBadge: string;
+  /** 画像を拡大表示するラッパの aria-label。`{name}` は alt (無ければ image)。 */
+  zoomImageLabel: string;
+  /** モーダル (dialog) の aria-label。`{name}` はキャプション (無ければ空)。 */
+  zoomDialogLabel: string;
+  /** モーダルの閉じるボタンの title。 */
+  zoomClose: string;
+  /** モーダルの拡大ボタンの title。 */
+  zoomIn: string;
+  /** モーダルの縮小ボタンの title。 */
+  zoomOut: string;
+  /** モーダルの全体表示ボタンの title。 */
+  zoomFit: string;
+  /** モーダルの操作ヒント。 */
+  zoomHint: string;
+}
+
+/** UI 文言の既定値 (日本語)。ConvertOptions.labels で個別に上書きできる。 */
+export const DEFAULT_LABELS: Labels = {
+  copy: "コピー",
+  toc: "目次",
+  image: "画像",
+  imagePlaceholder: "{name}（画像プレースホルダ）",
+  figure: "図",
+  zoomBadge: "拡大",
+  zoomImageLabel: "{name}を拡大表示",
+  zoomDialogLabel: "{name}拡大表示",
+  zoomClose: "閉じる",
+  zoomIn: "拡大",
+  zoomOut: "縮小",
+  zoomFit: "全体表示",
+  zoomHint:
+    "ドラッグで移動 · ホイールで拡大縮小 · ダブルクリックで全体表示 · Esc で閉じる",
+};
+
+/**
+ * zoom.js (クライアント側) が使う文言のキー。JSON ブロックへ載せる対象。
+ * 既定値のままなら JSON へ載せず zoom.js 側の既定を使うため、
+ * ここの既定値は zoom.js の DEFAULT_LABELS と一致している必要がある
+ * (一致は md2html.test.ts で検証する)。
+ */
+export const ZOOM_LABEL_KEYS = [
+  "image",
+  "figure",
+  "zoomBadge",
+  "zoomImageLabel",
+  "zoomDialogLabel",
+  "zoomClose",
+  "zoomIn",
+  "zoomOut",
+  "zoomFit",
+  "zoomHint",
+] as const satisfies ReadonlyArray<keyof Labels>;
+
+/** `{name}` を値で置換する。 */
+function formatLabel(template: string, name: string): string {
+  return template.replaceAll("{name}", name);
+}
+
 export interface ConvertOptions {
   /**
    * 出力 HTML の <title>。
@@ -34,6 +110,14 @@ export interface ConvertOptions {
    * 渡す markdown は frontmatter ブロックを除いた本文であること。
    */
   frontmatter?: Frontmatter;
+  /**
+   * 出力 HTML の `<html lang>`。省略時は "ja"。
+   * 優先順位 (CLI --lang > frontmatter lang > 既定) の解決は呼び出し側の責務で、
+   * ここでは frontmatter.lang を参照しない。
+   */
+  lang?: string;
+  /** UI 文言の上書き。指定しないキーは DEFAULT_LABELS (日本語) のまま。 */
+  labels?: Partial<Labels>;
   /** 追記するユーザ CSS (テキスト)。 */
   css?: string;
   /** mermaid ブロックがあるときだけ呼ばれる。mermaid の browser 向け bundle 本文を返す。 */
@@ -128,12 +212,13 @@ function rehypeMermaid(used: { value: boolean }) {
 /**
  * http(s): / data: 以外の img src を扱う rehype プラグイン。resolveImage が
  * 画像を返せば data URI へ差し替え、null を返せば (ローカルに実体が無ければ)
- * `<div class="img-ph">alt（画像プレースホルダ）</div>` へ置換する。
+ * `<div class="img-ph">` + labels.imagePlaceholder へ置換する。
  * 置換されずに img として残った要素が 1 つでもあれば used.value を true にする
  * (zoom.js の既定対象 (img) を埋め込むかの判定に使う)。
  */
 function rehypeInlineImages(
   resolveImage: ConvertOptions["resolveImage"],
+  labels: Labels,
   used: { value: boolean },
 ) {
   return async (tree: HastNode) => {
@@ -177,9 +262,10 @@ function rehypeInlineImages(
       const alt = typeof node.properties.alt === "string"
         ? node.properties.alt
         : "";
-      const label = alt !== ""
-        ? `${alt}（画像プレースホルダ）`
-        : "画像（画像プレースホルダ）";
+      const label = formatLabel(
+        labels.imagePlaceholder,
+        alt !== "" ? alt : labels.image,
+      );
       parent.children[index] = {
         type: "element",
         tagName: "div",
@@ -224,7 +310,7 @@ function rehypeTableWrap() {
  * @shikijs/rehype より後に適用する。コードブロックを 1 つでも変換したら
  * used.value を true にする。
  */
-function rehypeCodeBlocks(used: { value: boolean }) {
+function rehypeCodeBlocks(labels: Labels, used: { value: boolean }) {
   return (tree: HastNode) => {
     visit(
       tree,
@@ -270,7 +356,7 @@ function rehypeCodeBlocks(used: { value: boolean }) {
           type: "element",
           tagName: "button",
           properties: { className: ["code-copy"], type: "button" },
-          children: [{ type: "text", value: "コピー" }],
+          children: [{ type: "text", value: labels.copy }],
         });
 
         parent.children[index] = {
@@ -393,9 +479,20 @@ function escapeHtml(text: string): string {
     .replaceAll("'", "&#39;");
 }
 
-/** 埋め込み <script> 内の `</script` によるタグの早期終了を防ぐ。 */
+/**
+ * 埋め込み <script> 内の `</script` によるタグの早期終了を防ぐ。
+ * JS では文字列・正規表現中の `\/` は `/` のエスケープとして解釈されるため意味は変わらない。
+ */
 function escapeScriptClose(js: string): string {
-  return js.replace(/<\/script/gi, "<\\/script");
+  return js.replace(/<\/script/gi, (match) => `<\\${match.slice(1)}`);
+}
+
+/**
+ * 埋め込み <style> 内の `</style` によるタグの早期終了を防ぐ。
+ * CSS では文字列中の `\/` は `/` のエスケープとして解釈されるため意味は変わらない。
+ */
+function escapeStyleClose(css: string): string {
+  return css.replace(/<\/style/gi, (match) => `<\\${match.slice(1)}`);
 }
 
 /**
@@ -425,6 +522,7 @@ export async function convert(
   const codeBlockUsed = { value: false };
   const imageUsed = { value: false };
   const headings: TocEntry[] = [];
+  const labels: Labels = { ...DEFAULT_LABELS, ...options.labels };
 
   const file = await unified()
     .use(remarkParse)
@@ -453,9 +551,9 @@ export async function convert(
       addLanguageClass: true,
     })
     .use(rehypeHeadingIds, headings)
-    .use(rehypeCodeBlocks, codeBlockUsed)
+    .use(rehypeCodeBlocks, labels, codeBlockUsed)
     .use(rehypeTableWrap)
-    .use(rehypeInlineImages, options.resolveImage, imageUsed)
+    .use(rehypeInlineImages, options.resolveImage, labels, imageUsed)
     .use(rehypeStringify, { allowDangerousHtml: true })
     .process(markdown);
 
@@ -477,7 +575,9 @@ export async function convert(
         }</a></li>`
       )
       .join("");
-    tocAside = `<aside class="toc" aria-label="目次"><ul>${items}</ul></aside>`;
+    tocAside = `<aside class="toc" aria-label="${
+      escapeHtml(labels.toc)
+    }"><ul>${items}</ul></aside>`;
   } else {
     layoutStyle = ' style="grid-template-columns: minmax(0, 1fr)"';
   }
@@ -497,13 +597,26 @@ export async function convert(
   const zoomNeeded = mermaidUsed.value ||
     (zoomTargets.length > 0 &&
       (explicitTargets !== undefined || imageUsed.value));
+  // zoom.js の文言。既定のままなら JSON へ載せない (zoom.js 側の既定が使われる)。
+  const zoomLabels: Partial<Labels> = {};
+  for (const key of ZOOM_LABEL_KEYS) {
+    if (labels[key] !== DEFAULT_LABELS[key]) {
+      zoomLabels[key] = labels[key];
+    }
+  }
+  const hasZoomLabels = Object.keys(zoomLabels).length > 0;
   let zoomTargetsJson = "";
   let zoomScript = "";
   if (zoomNeeded) {
-    if (zoomTargets.length > 0) {
+    // 文言の上書きが無ければセレクタの配列そのものを載せ、あれば
+    // { targets, labels } のオブジェクトにする (zoom.js は両方を読める)。
+    if (zoomTargets.length > 0 || hasZoomLabels) {
+      const payload = hasZoomLabels
+        ? { targets: zoomTargets, labels: zoomLabels }
+        : zoomTargets;
       zoomTargetsJson =
         `<script type="application/json" id="md2html-zoom-targets">${
-          escapeJsonForHtml(JSON.stringify(zoomTargets))
+          escapeJsonForHtml(JSON.stringify(payload))
         }</script>`;
     }
     zoomScript = `<script>${escapeScriptClose(ZOOM_JS)}</script>`;
@@ -514,21 +627,25 @@ export async function convert(
     ? ""
     : `<meta name="description" content="${escapeHtml(description)}">`;
 
+  const lang = options.lang ?? "ja";
+
   return [
     "<!doctype html>",
-    '<html lang="ja">',
+    `<html lang="${escapeHtml(lang)}">`,
     "<head>",
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>${escapeHtml(options.title)}</title>`,
     descriptionMeta,
     "<style>",
-    MARKDOWN_THEME_CSS,
-    options.css ?? "",
+    escapeStyleClose(MARKDOWN_THEME_CSS),
+    escapeStyleClose(options.css ?? ""),
     "</style>",
     "</head>",
     "<body>",
-    '<header class="site-header"><div class="inner"></div></header>',
+    `<header class="site-header"><div class="inner"><span class="brand">${
+      escapeHtml(options.title)
+    }</span></div></header>`,
     `<div class="layout"${layoutStyle}>`,
     `<article class="md">${body}</article>`,
     tocAside,

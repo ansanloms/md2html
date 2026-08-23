@@ -122,13 +122,6 @@ button {
   letter-spacing: .01em;
   color: var(--fg);
 }
-.site-header .brand .dot {
-  color: var(--accent);
-}
-.site-header .sub {
-  color: var(--fg-faint);
-  font-size: 13px;
-}
 
 .layout {
   max-width: var(--page-max);
@@ -509,8 +502,7 @@ button {
   opacity: 1;
 }
 .md .code-block pre,
-.md pre.shiki,
-.md .code-block .fallback {
+.md pre.shiki {
   margin: 0;
   padding: 15px 16px;
   overflow-x: auto;
@@ -523,11 +515,6 @@ button {
   font-family: inherit;
   font-size: inherit;
 }
-.md .fallback {
-  color: var(--fg);
-  white-space: pre;
-}
-
 /* shiki dual-theme: default is light; swap to dark vars under dark scheme */
 @media (prefers-color-scheme: dark) {
   .md .shiki,
