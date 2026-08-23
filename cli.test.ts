@@ -7,6 +7,7 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { dirname, fromFileUrl } from "@std/path";
 import { type CliDeps, main } from "./cli.ts";
+import { MERMAID_VERSION } from "./lib/mermaid.ts";
 
 const CLI_PATH = fromFileUrl(new URL("./cli.ts", import.meta.url));
 const REPO_ROOT = dirname(CLI_PATH);
@@ -69,6 +70,7 @@ Deno.test("--help は使い方を stdout に出して 0 で終わる", async () 
   assertEquals(code, 0);
   assertStringIncludes(stdout, "使い方: md2html");
   assertStringIncludes(stdout, "--version");
+  assertStringIncludes(stdout, "--mermaid-version");
 });
 
 Deno.test("--version は deno.json の version を stdout に出して 0 で終わる", async () => {
@@ -249,6 +251,49 @@ md2html: img
   assertStringIncludes(stdout, "<h1");
 });
 
+Deno.test("--mermaid-version の形式が不正なら exit 1 で指定元を含むエラーになる", async () => {
+  const { code, stderr } = await runCli(
+    ["--mermaid-version", "../x", "-"],
+    SIMPLE_MARKDOWN,
+  );
+  assertEquals(code, 1);
+  assertStringIncludes(
+    stderr,
+    'mermaid のバージョン指定 "../x" (--mermaid-version) の形式が不正です',
+  );
+});
+
+Deno.test("frontmatter の md2html.mermaid.version の形式が不正なら exit 1 になる", async () => {
+  const markdown = `---
+md2html:
+  mermaid:
+    version: "^11"
+---
+
+# 見出し
+`;
+  const { code, stderr } = await runCli(["-"], markdown);
+  assertEquals(code, 1);
+  assertStringIncludes(stderr, "(frontmatter の md2html.mermaid.version)");
+});
+
+Deno.test("frontmatter の md2html.mermaid が不正なら stderr へ警告を出しつつ変換は続ける", async () => {
+  const markdown = `---
+md2html:
+  mermaid: x
+---
+
+# 見出し
+`;
+  const { code, stdout, stderr } = await runCli(["-"], markdown);
+  assertEquals(code, 0);
+  assertStringIncludes(
+    stderr,
+    "md2html: frontmatter の md2html.mermaid はマッピングでないため無視した",
+  );
+  assertStringIncludes(stdout, "<h1");
+});
+
 /** main() を fake deps で直接呼ぶためのテスト用 CliDeps を作る。 */
 function fakeDeps(overrides: Partial<CliDeps> = {}): {
   deps: CliDeps;
@@ -299,4 +344,98 @@ Deno.test("main(): stdin 入力を変換して out に積む", async () => {
   assertEquals(out.length, 1);
   assertStringIncludes(out[0], "<title>md2html</title>");
   assertStringIncludes(out[0], "<h1");
+});
+
+const MERMAID_MARKDOWN = "```mermaid\ngraph TD; A-->B;\n```\n";
+
+/** mermaid バージョン検証テスト用に、渡された version を記録する fakeDeps を作る。 */
+function fakeDepsRecordingMermaidVersion(
+  markdown: string,
+  overrides: Partial<CliDeps> = {},
+): { deps: CliDeps; out: string[]; err: string[]; versions: string[] } {
+  const versions: string[] = [];
+  const { deps, out, err } = fakeDeps({
+    stdinIsTerminal: () => false,
+    readStdin: () => Promise.resolve(markdown),
+    getMermaidJs: (version) => {
+      versions.push(version);
+      return Promise.resolve("/* mermaid stub */");
+    },
+    ...overrides,
+  });
+  return { deps, out, err, versions };
+}
+
+Deno.test("main(): 既定では MERMAID_VERSION が getMermaidJs に渡る", async () => {
+  const { deps, versions } = fakeDepsRecordingMermaidVersion(MERMAID_MARKDOWN);
+  const code = await main([], deps);
+  assertEquals(code, 0);
+  assertEquals(versions, [MERMAID_VERSION]);
+});
+
+Deno.test("main(): frontmatter の md2html.mermaid.version が getMermaidJs に渡る", async () => {
+  const markdown = `---
+md2html:
+  mermaid:
+    version: 11.0.0
+---
+
+${MERMAID_MARKDOWN}`;
+  const { deps, versions } = fakeDepsRecordingMermaidVersion(markdown);
+  const code = await main([], deps);
+  assertEquals(code, 0);
+  assertEquals(versions, ["11.0.0"]);
+});
+
+Deno.test("main(): --mermaid-version は frontmatter より優先される", async () => {
+  const markdown = `---
+md2html:
+  mermaid:
+    version: 11.0.0
+---
+
+${MERMAID_MARKDOWN}`;
+  const { deps, versions } = fakeDepsRecordingMermaidVersion(markdown);
+  const code = await main(["--mermaid-version", "11.1.0"], deps);
+  assertEquals(code, 0);
+  assertEquals(versions, ["11.1.0"]);
+});
+
+Deno.test('main(): --mermaid-version "" は未指定扱い', async () => {
+  const markdown = `---
+md2html:
+  mermaid:
+    version: 11.0.0
+---
+
+${MERMAID_MARKDOWN}`;
+  const { deps, versions } = fakeDepsRecordingMermaidVersion(markdown);
+  const code = await main(["--mermaid-version", ""], deps);
+  assertEquals(code, 0);
+  assertEquals(versions, ["11.0.0"]);
+});
+
+Deno.test("main(): getMermaidJs が失敗すると版と指定元を含むエラーで 1 を返す", async () => {
+  const markdown = `---
+md2html:
+  mermaid:
+    version: 11.0.0
+---
+
+${MERMAID_MARKDOWN}`;
+  const { deps, err } = fakeDeps({
+    stdinIsTerminal: () => false,
+    readStdin: () => Promise.resolve(markdown),
+    getMermaidJs: () =>
+      Promise.reject(new Error("deno bundle に失敗した: boom")),
+  });
+  const code = await main([], deps);
+  assertEquals(code, 1);
+  assert(
+    err.some((line) =>
+      line.includes(
+        "mermaid 11.0.0 (frontmatter の md2html.mermaid.version) の取得に失敗した: deno bundle に失敗した: boom",
+      )
+    ),
+  );
 });

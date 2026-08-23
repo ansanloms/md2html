@@ -14,6 +14,7 @@ export { parseFrontmatter } from "./lib/frontmatter.ts";
 export type {
   Frontmatter,
   Md2htmlOptions,
+  MermaidOptions,
   ParsedMarkdown,
 } from "./lib/frontmatter.ts";
 
@@ -23,7 +24,9 @@ export type { ImageResolverDeps } from "./lib/image.ts";
 export {
   bundleRevision,
   getMermaidBundle,
+  isValidMermaidVersion,
   MERMAID_VERSION,
+  MERMAID_VERSION_PATTERN,
   mermaidEntrySource,
   resolveCacheDir,
 } from "./lib/mermaid.ts";

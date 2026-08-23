@@ -28,7 +28,12 @@ import { basename, dirname } from "@std/path";
 import { convert } from "./lib/convert.ts";
 import { createImageResolver } from "./lib/image.ts";
 import { type Frontmatter, parseFrontmatter } from "./lib/frontmatter.ts";
-import { getMermaidBundle, type MermaidBundleDeps } from "./lib/mermaid.ts";
+import {
+  getMermaidBundle,
+  isValidMermaidVersion,
+  MERMAID_VERSION,
+  type MermaidBundleDeps,
+} from "./lib/mermaid.ts";
 import denoJson from "./deno.json" with { type: "json" };
 
 /**
@@ -36,13 +41,16 @@ import denoJson from "./deno.json" with { type: "json" };
  * ファイル冒頭コメント・README・エラー出力で文面を分散させないため、ここに一本化する。
  */
 const USAGE =
-  `使い方: md2html [<input.md>] [--output <path>] [--css <path>] [--title <title>] [--lang <lang>]
+  `使い方: md2html [<input.md>] [--output <path>] [--css <path>] [--title <title>] [--lang <lang>] [--mermaid-version <version>]
   <input.md>  入力 markdown ファイル。省略するか "-" を指定すると stdin から読む。
   --output    出力先パス。省略時は stdout。
   --css       追記するユーザ CSS ファイルのパス。
   --title     HTML の <title>。省略時は frontmatter の title、それも無ければ
               入力ファイル名 (stdin から読む場合は "md2html")。
   --lang      HTML の <html lang>。省略時は frontmatter の lang、それも無ければ "ja"。
+  --mermaid-version
+              mermaid の npm バージョン。省略時は frontmatter の md2html.mermaid.version、
+              それも無ければ ${MERMAID_VERSION}。
   --help      この使い方を表示する。
   --version   バージョンを表示する。`;
 
@@ -100,8 +108,8 @@ export interface CliDeps {
   readTextFile: (path: string) => Promise<string>;
   readFile: (path: string) => Promise<Uint8Array>;
   writeTextFile: (path: string, text: string) => Promise<void>;
-  /** mermaid の browser 向け bundle (JS ソース) を返す。 */
-  getMermaidJs: () => Promise<string>;
+  /** 指定した npm バージョンの mermaid の browser 向け bundle (JS ソース) を返す。 */
+  getMermaidJs: (version: string) => Promise<string>;
   /** stdout へ 1 行書く (console.log 相当)。 */
   log: (text: string) => void;
   /** stderr へ 1 行書く (console.error 相当)。 */
@@ -115,7 +123,7 @@ export const denoDeps: CliDeps = {
   readTextFile: (path) => Deno.readTextFile(path),
   readFile: (path) => Deno.readFile(path),
   writeTextFile: (path, text) => Deno.writeTextFile(path, text),
-  getMermaidJs: () => getMermaidBundle(mermaidBundleDeps),
+  getMermaidJs: (version) => getMermaidBundle(mermaidBundleDeps, version),
   log: (text) => console.log(text),
   error: (text) => console.error(text),
 };
@@ -141,7 +149,7 @@ export async function main(
   // 短縮フラグの塊 (`-xy`) では同じ arg で文字数分呼ばれるため Set で重複を潰す。
   const unknownOptions = new Set<string>();
   const parsed = parseArgs(args, {
-    string: ["output", "css", "title", "lang"],
+    string: ["output", "css", "title", "lang", "mermaid-version"],
     boolean: ["help", "version"],
     unknown: (arg) => {
       if (arg.startsWith("-") && arg !== "-") {
@@ -181,9 +189,9 @@ export async function main(
   // (`--title ""` は title に "" を入れつつ "_" にも "" を積む)。この漏れ出しぶんだけを
   // 1 つ取り除き、残った空文字列は本物の位置引数 (シェル変数が空だった等) として弾く。
   // 空値でエラーにする --output / --css は上で弾いているため、ここでは
-  // 空値を未指定扱いにするオプション (--title / --lang) のぶんだけ数える。
+  // 空値を未指定扱いにするオプション (--title / --lang / --mermaid-version) のぶんだけ数える。
   const positional = parsed._.map(String);
-  for (const value of [parsed.title, parsed.lang]) {
+  for (const value of [parsed.title, parsed.lang, parsed["mermaid-version"]]) {
     if (value !== "") {
       continue;
     }
@@ -258,6 +266,25 @@ export async function main(
   // 空の --lang も同様に未指定として扱う。
   const lang = (parsed.lang || undefined) ?? frontmatter.lang;
 
+  // mermaid のバージョンも CLI > frontmatter > 既定。空の --mermaid-version は未指定扱い。
+  const cliMermaidVersion = parsed["mermaid-version"] || undefined;
+  const frontmatterMermaidVersion = frontmatter.md2html?.mermaid?.version;
+  const mermaidVersion = cliMermaidVersion ?? frontmatterMermaidVersion ??
+    MERMAID_VERSION;
+  const mermaidVersionSource = cliMermaidVersion !== undefined
+    ? "--mermaid-version"
+    : frontmatterMermaidVersion !== undefined
+    ? "frontmatter の md2html.mermaid.version"
+    : "既定";
+  // 指定子はキャッシュのファイル名と bundle エントリに埋め込むため、mermaid ブロックの有無に
+  // 関わらずここで形式を検査し、指定元を添えて弾く。
+  if (!isValidMermaidVersion(mermaidVersion)) {
+    deps.error(
+      `md2html: mermaid のバージョン指定 "${mermaidVersion}" (${mermaidVersionSource}) の形式が不正です (先頭は英数字、以降は英数字・"."・"-"・"+" のみ)`,
+    );
+    return 1;
+  }
+
   let html: string;
   try {
     html = await convert(body, {
@@ -265,7 +292,17 @@ export async function main(
       frontmatter,
       lang,
       css,
-      getMermaidJs: deps.getMermaidJs,
+      getMermaidJs: async () => {
+        try {
+          return await deps.getMermaidJs(mermaidVersion);
+        } catch (error) {
+          throw new Error(
+            `mermaid ${mermaidVersion} (${mermaidVersionSource}) の取得に失敗した: ${
+              messageOf(error)
+            }`,
+          );
+        }
+      },
       resolveImage: createImageResolver({
         readFile: deps.readFile,
         baseDir: dirname(inputPath),

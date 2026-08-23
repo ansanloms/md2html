@@ -15,6 +15,14 @@ export interface Md2htmlOptions {
    * 空配列は「既定を外す (mermaid 図のみ)」を意味する。
    */
   zoomTargets?: string[];
+  /** mermaid の設定。 */
+  mermaid?: MermaidOptions;
+}
+
+/** frontmatter の `md2html.mermaid` 名前空間で指定する mermaid の設定。 */
+export interface MermaidOptions {
+  /** mermaid の npm バージョン指定子。未指定なら lib/mermaid.ts の MERMAID_VERSION。 */
+  version?: string;
 }
 
 /** frontmatter から読み取る既知のキー。 */
@@ -145,7 +153,31 @@ export function parseFrontmatter(markdown: string): ParsedMarkdown {
             `frontmatter の md2html.zoomTargets の ${dropped} 件は非空の文字列でないため除外した`,
           );
         }
-        frontmatter.md2html = { zoomTargets };
+        frontmatter.md2html = { ...frontmatter.md2html, zoomTargets };
+      }
+
+      const rawMermaid = (md2html as Record<string, unknown>).mermaid;
+      // 値の無いキー (`mermaid:` だけ書いた等) は未設定として扱い、警告もしない。
+      if (!isEmptyValue(rawMermaid)) {
+        if (typeof rawMermaid !== "object" || Array.isArray(rawMermaid)) {
+          warnings.push(
+            "frontmatter の md2html.mermaid はマッピングでないため無視した",
+          );
+        } else {
+          const rawVersion = (rawMermaid as Record<string, unknown>).version;
+          if (isEmptyValue(rawVersion)) {
+            // 既知のキーが無い・値が空なら未設定のまま (警告もしない)。
+          } else if (typeof rawVersion !== "string") {
+            warnings.push(
+              "frontmatter の md2html.mermaid.version は文字列でないため無視した",
+            );
+          } else {
+            frontmatter.md2html = {
+              ...frontmatter.md2html,
+              mermaid: { version: rawVersion },
+            };
+          }
+        }
       }
     }
   }

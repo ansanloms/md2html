@@ -12,6 +12,21 @@ import { MERMAID_RENDER_JS } from "./assets.ts";
  */
 export const MERMAID_VERSION = "11.16.0";
 
+/**
+ * frontmatter / CLI から受け取る mermaid バージョン指定子に許す文字種。
+ * 指定子はキャッシュのファイル名と bundle 用エントリの `npm:mermaid@<version>` に
+ * そのまま埋め込むため、`../` や `"` を含む値を通すとパス逸脱・ソース注入になる。
+ * 完全一致の版 (11.16.0)・プレリリース (11.0.0-alpha.1)・dist-tag (latest) は通し、
+ * レンジ (^11 / ~11.1 / >=11) や空白は弾く。レンジや dist-tag はキャッシュキーが
+ * その文字列のまま固定され更新されない点に注意 (README 参照)。
+ */
+export const MERMAID_VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/;
+
+/** version が MERMAID_VERSION_PATTERN を満たすか。 */
+export function isValidMermaidVersion(version: string): boolean {
+  return MERMAID_VERSION_PATTERN.test(version);
+}
+
 /** キャッシュディレクトリに置く bundle ファイル名の前後。 */
 const BUNDLE_PREFIX = "mermaid-";
 const BUNDLE_SUFFIX = ".bundle.js";
@@ -155,6 +170,12 @@ export async function getMermaidBundle(
   deps: MermaidBundleDeps,
   version: string = MERMAID_VERSION,
 ): Promise<string> {
+  if (!isValidMermaidVersion(version)) {
+    throw new Error(
+      `mermaid のバージョン指定 "${version}" は使えない (先頭は英数字、以降は英数字・"."・"-"・"+" のみ)`,
+    );
+  }
+
   const cacheDir = resolveCacheDir(deps.env);
   const revision = bundleRevision(version, deps.denoVersion);
   const cachePath =
