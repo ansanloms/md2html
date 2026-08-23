@@ -129,6 +129,46 @@ Deno.test("title は HTML エスケープされる", async () => {
   );
 });
 
+Deno.test("frontmatter の description は meta タグとして出力される", async () => {
+  const html = await convert(
+    "# hello\n",
+    baseOptions({ frontmatter: { description: "説明文" } }),
+  );
+  assertStringIncludes(html, '<meta name="description" content="説明文">');
+  assertEquals(
+    html.indexOf("<title>") < html.indexOf('<meta name="description"'),
+    true,
+  );
+});
+
+Deno.test("frontmatter の description は HTML エスケープされる", async () => {
+  const html = await convert(
+    "# hello\n",
+    baseOptions({ frontmatter: { description: 'a "b" <c> & d' } }),
+  );
+  assertStringIncludes(
+    html,
+    '<meta name="description" content="a &quot;b&quot; &lt;c&gt; &amp; d">',
+  );
+});
+
+Deno.test("frontmatter が無い・description が無い場合は meta description を出力しない", async () => {
+  const html1 = await convert("# hello\n", baseOptions());
+  assertEquals(html1.includes('name="description"'), false);
+
+  const html2 = await convert(
+    "# hello\n",
+    baseOptions({ frontmatter: {} }),
+  );
+  assertEquals(html2.includes('name="description"'), false);
+
+  const html3 = await convert(
+    "# hello\n",
+    baseOptions({ frontmatter: { description: "" } }),
+  );
+  assertEquals(html3.includes('name="description"'), false);
+});
+
 Deno.test("header.site-header と article.md で本文が構成される", async () => {
   const html = await convert("# hello\n", baseOptions());
   assertStringIncludes(
