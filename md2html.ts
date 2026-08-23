@@ -17,48 +17,18 @@
 // このプロセス自身はネットワーク権限を必要としない (npm:mermaid の取得は
 // 子プロセスの deno bundle が自身のモジュール解決として行う)。
 //
+// ローカル画像は入力ファイルのディレクトリを基準に解決し (lib/image.ts)、見つからなければ
+// cwd 基準へフォールバックする。
+//
 // 変換ロジックは lib/convert.ts の convert() に分離し、副作用 (ファイル読み書き・
 // mermaid bundle 取得・キャッシュ) はここで組み立てて注入する。
 
 import { parseArgs } from "@std/cli/parse-args";
-import { basename } from "@std/path";
+import { basename, dirname } from "@std/path";
 import { convert } from "./lib/convert.ts";
+import { createImageResolver } from "./lib/image.ts";
 import { type Frontmatter, parseFrontmatter } from "./lib/frontmatter.ts";
 import { getMermaidBundle, type MermaidBundleDeps } from "./lib/mermaid.ts";
-
-const IMAGE_MIME_TYPES: Record<string, string> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".svg": "image/svg+xml",
-  ".webp": "image/webp",
-};
-
-/** 拡張子から画像 mime を引く。対応外は null。 */
-function imageMimeType(path: string): string | null {
-  const dot = path.lastIndexOf(".");
-  if (dot === -1) {
-    return null;
-  }
-  return IMAGE_MIME_TYPES[path.slice(dot).toLowerCase()] ?? null;
-}
-
-/** cwd 相対でローカル画像を読み込む。対応外の拡張子・読み込み失敗は null。 */
-async function resolveImage(
-  src: string,
-): Promise<{ mime: string; data: Uint8Array } | null> {
-  const mime = imageMimeType(src);
-  if (mime === null) {
-    return null;
-  }
-  try {
-    const data = await Deno.readFile(src);
-    return { mime, data };
-  } catch {
-    return null;
-  }
-}
 
 /**
  * entryPath を browser 向けに bundle し outPath へ書き出す。失敗時は throw する。
@@ -166,7 +136,10 @@ async function main(): Promise<number> {
       frontmatter,
       css,
       getMermaidJs,
-      resolveImage,
+      resolveImage: createImageResolver({
+        readFile: Deno.readFile,
+        baseDir: dirname(inputPath),
+      }),
     });
   } catch (error) {
     console.error(
