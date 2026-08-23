@@ -1,7 +1,6 @@
 // mermaid の browser 向け bundle 供給の純粋ロジック。
 // 副作用 (ファイル読み書き・一時ディレクトリ作成・deno bundle の実行) は
-// MermaidBundleDeps 経由で呼び出し側から注入する (clip-image.ts の
-// resolveCacheDir(env) の前例に倣う)。
+// MermaidBundleDeps 経由で呼び出し側から注入する。
 
 import { MERMAID_RENDER_JS } from "./assets.ts";
 

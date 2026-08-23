@@ -1,5 +1,5 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
-import { convert, type ConvertOptions, slugify } from "./md2html.ts";
+import { convert, type ConvertOptions, slugify } from "./convert.ts";
 
 /** テスト用の最小 ConvertOptions。個別のテストで必要な項目だけ上書きする。 */
 function baseOptions(
