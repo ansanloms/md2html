@@ -1,4 +1,4 @@
-// CLI (md2html.ts) のスモークテスト。
+// CLI (cli.ts) のスモークテスト。
 //
 // 変換ロジックそのものは lib/convert.test.ts が検証するので、ここでは CLI の
 // 引数解釈・終了コード・stdin 入力といった実行時の振る舞いだけを見る。
@@ -6,8 +6,9 @@
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { dirname, fromFileUrl } from "@std/path";
+import { type CliDeps, main } from "./cli.ts";
 
-const CLI_PATH = fromFileUrl(new URL("./md2html.ts", import.meta.url));
+const CLI_PATH = fromFileUrl(new URL("./cli.ts", import.meta.url));
 const REPO_ROOT = dirname(CLI_PATH);
 
 interface CliResult {
@@ -16,7 +17,7 @@ interface CliResult {
   stderr: string;
 }
 
-/** md2html.ts を子プロセスとして実行する。stdin を渡すとパイプ入力になる。 */
+/** cli.ts を子プロセスとして実行する。stdin を渡すとパイプ入力になる。 */
 async function runCli(args: string[], stdin?: string): Promise<CliResult> {
   const child = new Deno.Command("deno", {
     args: ["run", "--quiet", "--allow-all", CLI_PATH, ...args],
@@ -246,4 +247,56 @@ md2html: img
     "md2html: frontmatter の md2html はマッピングでないため無視した",
   );
   assertStringIncludes(stdout, "<h1");
+});
+
+/** main() を fake deps で直接呼ぶためのテスト用 CliDeps を作る。 */
+function fakeDeps(overrides: Partial<CliDeps> = {}): {
+  deps: CliDeps;
+  out: string[];
+  err: string[];
+} {
+  const out: string[] = [];
+  const err: string[] = [];
+  const deps: CliDeps = {
+    stdinIsTerminal: () => false,
+    readStdin: () => Promise.resolve(""),
+    readTextFile: () => Promise.reject(new Error("not implemented")),
+    readFile: () => Promise.reject(new Error("not implemented")),
+    writeTextFile: () => Promise.reject(new Error("not implemented")),
+    getMermaidJs: () => Promise.resolve("/* mermaid stub */"),
+    log: (text) => out.push(text),
+    error: (text) => err.push(text),
+    ...overrides,
+  };
+  return { deps, out, err };
+}
+
+Deno.test("main(): --help は使い方を out に積んで 0 を返す", async () => {
+  const { deps, out, err } = fakeDeps();
+  const code = await main(["--help"], deps);
+  assertEquals(code, 0);
+  assertEquals(out.length, 1);
+  assertStringIncludes(out[0], "使い方: md2html");
+  assertEquals(err.length, 0);
+});
+
+Deno.test("main(): 読み込めない入力ファイルは err の先頭にエラーを積んで 1 を返す", async () => {
+  const { deps, err } = fakeDeps({
+    readTextFile: () => Promise.reject(new Error("ENOENT")),
+  });
+  const code = await main(["missing.md"], deps);
+  assertEquals(code, 1);
+  assertEquals(err[0], "md2html: 入力ファイルを読み込めない: ENOENT");
+});
+
+Deno.test("main(): stdin 入力を変換して out に積む", async () => {
+  const { deps, out } = fakeDeps({
+    stdinIsTerminal: () => false,
+    readStdin: () => Promise.resolve("# hello\n"),
+  });
+  const code = await main([], deps);
+  assertEquals(code, 0);
+  assertEquals(out.length, 1);
+  assertStringIncludes(out[0], "<title>md2html</title>");
+  assertStringIncludes(out[0], "<h1");
 });
