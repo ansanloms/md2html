@@ -17,12 +17,12 @@
 // このプロセス自身はネットワーク権限を必要としない (npm:mermaid の取得は
 // 子プロセスの deno bundle が自身のモジュール解決として行う)。
 //
-// 変換ロジックは lib/md2html.ts の convert() に分離し、副作用 (ファイル読み書き・
+// 変換ロジックは lib/convert.ts の convert() に分離し、副作用 (ファイル読み書き・
 // mermaid bundle 取得・キャッシュ) はここで組み立てて注入する。
 
 import { parseArgs } from "@std/cli/parse-args";
 import { basename } from "@std/path";
-import { convert } from "./lib/md2html.ts";
+import { convert } from "./lib/convert.ts";
 import { type Frontmatter, parseFrontmatter } from "./lib/frontmatter.ts";
 import { getMermaidBundle, type MermaidBundleDeps } from "./lib/mermaid.ts";
 
