@@ -1,11 +1,8 @@
-#!/usr/bin/env -S deno run --quiet --allow-read --allow-write --allow-run=deno --allow-env
+#!/usr/bin/env -S deno run --quiet --allow-read --allow-write --allow-run=deno --allow-env=HOME,XDG_CACHE_HOME,VSCODE_TEXTMATE_DEBUG
 
 // markdown ファイルを自己完結 HTML (シンタックスハイライト + mermaid 内蔵) へ変換する CLI。
 //
-// 使い方: md2html <input.md> [--output <path>] [--css <path>] [--title <title>]
-//   --output  出力先パス。省略時は stdout。
-//   --css     追記するユーザ CSS ファイルのパス。
-//   --title   HTML の <title>。省略時は frontmatter の title、それも無ければ入力ファイル名。
+// 使い方は USAGE 定数を参照 (--help でも表示する)。
 //
 // 入力 markdown 先頭の YAML frontmatter (lib/frontmatter.ts) を解釈し、title と
 // description を出力 HTML のメタ情報へ、md2html.zoomTargets をモーダル拡大表示の
@@ -29,6 +26,21 @@ import { convert } from "./lib/convert.ts";
 import { createImageResolver } from "./lib/image.ts";
 import { type Frontmatter, parseFrontmatter } from "./lib/frontmatter.ts";
 import { getMermaidBundle, type MermaidBundleDeps } from "./lib/mermaid.ts";
+import denoJson from "./deno.json" with { type: "json" };
+
+/**
+ * --help および引数エラー時に出す使い方。
+ * ファイル冒頭コメント・README・エラー出力で文面を分散させないため、ここに一本化する。
+ */
+const USAGE =
+  `使い方: md2html [<input.md>] [--output <path>] [--css <path>] [--title <title>]
+  <input.md>  入力 markdown ファイル。省略するか "-" を指定すると stdin から読む。
+  --output    出力先パス。省略時は stdout。
+  --css       追記するユーザ CSS ファイルのパス。
+  --title     HTML の <title>。省略時は frontmatter の title、それも無ければ
+              入力ファイル名 (stdin から読む場合は "md2html")。
+  --help      この使い方を表示する。
+  --version   バージョンを表示する。`;
 
 /**
  * entryPath を browser 向けに bundle し outPath へ書き出す。失敗時は throw する。
@@ -80,41 +92,104 @@ function getMermaidJs(): Promise<string> {
   return getMermaidBundle(mermaidBundleDeps);
 }
 
+/** エラーメッセージ本文を取り出す。 */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** エラーと使い方を stderr へ出す。 */
+function usageError(message: string): number {
+  console.error(`md2html: ${message}`);
+  console.error(USAGE);
+  return 1;
+}
+
 async function main(): Promise<number> {
+  // parseArgs は未知のフラグも黙って受け入れるため、unknown で拾って後段で弾く。
+  // 位置引数 (key 無し) と stdin を表す "-" は正当なので対象外にする。
+  // 短縮フラグの塊 (`-xy`) では同じ arg で文字数分呼ばれるため Set で重複を潰す。
+  const unknownOptions = new Set<string>();
   const parsed = parseArgs(Deno.args, {
     string: ["output", "css", "title"],
+    boolean: ["help", "version"],
+    unknown: (arg) => {
+      if (arg.startsWith("-") && arg !== "-") {
+        unknownOptions.add(arg);
+      }
+      return true;
+    },
   });
 
-  const inputPath = parsed._[0];
-  if (typeof inputPath !== "string") {
-    console.error("md2html: 入力ファイルを指定してください");
-    console.error(
-      "使い方: md2html <input.md> [--output <path>] [--css <path>] [--title <title>]",
-    );
-    return 1;
+  if (parsed.help) {
+    console.log(USAGE);
+    return 0;
   }
+
+  if (parsed.version) {
+    console.log(denoJson.version);
+    return 0;
+  }
+
+  if (unknownOptions.size > 0) {
+    return usageError(`不明なオプション: ${[...unknownOptions].join(", ")}`);
+  }
+
+  // 値を伴わない --output / --css は parseArgs が空文字列を返す。
+  // 空文字列のパスは書き込み・読み込みのどちらでも意味を持たないためエラーにする。
+  if (parsed.output === "") {
+    return usageError("--output にパスを指定してください");
+  }
+  if (parsed.css === "") {
+    return usageError("--css にパスを指定してください");
+  }
+
+  // parseArgs は空文字列の引数を、オプションの値として消費した場合でも "_" へ積む
+  // (`--title ""` は title に "" を入れつつ "_" にも "" を積む)。この漏れ出しぶんだけを
+  // 1 つ取り除き、残った空文字列は本物の位置引数 (シェル変数が空だった等) として弾く。
+  const positional = parsed._.map(String);
+  if (parsed.title === "") {
+    const leaked = positional.indexOf("");
+    if (leaked !== -1) {
+      positional.splice(leaked, 1);
+    }
+  }
+  if (positional.includes("")) {
+    return usageError("入力ファイルのパスが空です");
+  }
+  if (positional.length > 1) {
+    return usageError("入力ファイルは 1 つだけ指定してください");
+  }
+
+  // 位置引数が無く stdin が端末 (パイプでもリダイレクトでもない) なら、
+  // 無言でブロックせず使い方を出す。
+  if (positional.length === 0 && Deno.stdin.isTerminal()) {
+    return usageError("入力ファイルを指定してください");
+  }
+
+  const inputPath = positional.length === 1 ? positional[0] : "-";
+  const fromStdin = inputPath === "-";
 
   let markdown: string;
   try {
-    markdown = await Deno.readTextFile(inputPath);
+    markdown = fromStdin
+      ? await new Response(Deno.stdin.readable).text()
+      : await Deno.readTextFile(inputPath);
   } catch (error) {
     console.error(
-      `md2html: 入力ファイルを読み込めない: ${
-        error instanceof Error ? error.message : String(error)
+      `md2html: ${fromStdin ? "stdin" : "入力ファイル"}を読み込めない: ${
+        messageOf(error)
       }`,
     );
     return 1;
   }
 
   let css: string | undefined;
-  if (parsed.css) {
+  if (parsed.css !== undefined) {
     try {
       css = await Deno.readTextFile(parsed.css);
     } catch (error) {
       console.error(
-        `md2html: CSS ファイルを読み込めない: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `md2html: CSS ファイルを読み込めない: ${messageOf(error)}`,
       );
       return 1;
     }
@@ -125,13 +200,17 @@ async function main(): Promise<number> {
   try {
     ({ frontmatter, body } = parseFrontmatter(markdown));
   } catch (error) {
-    console.error(
-      `md2html: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    console.error(`md2html: ${messageOf(error)}`);
     return 1;
   }
 
-  const title = parsed.title ?? frontmatter.title ?? basename(inputPath);
+  // frontmatter の title は空文字列を未指定扱いにしている (lib/frontmatter.ts)。
+  // --title "" もそれに揃え、<title></title> にならないようにする。
+  const cliTitle = parsed.title === undefined || parsed.title === ""
+    ? undefined
+    : parsed.title;
+  const title = cliTitle ?? frontmatter.title ??
+    (fromStdin ? "md2html" : basename(inputPath));
 
   let html: string;
   try {
@@ -146,16 +225,19 @@ async function main(): Promise<number> {
       }),
     });
   } catch (error) {
-    console.error(
-      `md2html: 変換に失敗した: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
+    console.error(`md2html: 変換に失敗した: ${messageOf(error)}`);
     return 1;
   }
 
-  if (parsed.output) {
-    await Deno.writeTextFile(parsed.output, html);
+  if (parsed.output !== undefined) {
+    try {
+      await Deno.writeTextFile(parsed.output, html);
+    } catch (error) {
+      console.error(
+        `md2html: 出力ファイルを書き込めない: ${messageOf(error)}`,
+      );
+      return 1;
+    }
   } else {
     console.log(html);
   }

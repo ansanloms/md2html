@@ -1,5 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/denoland/deno/refs/heads/main/cli/schemas/config-file.v1.json",
+  "version": "0.1.0",
   "fmt": {
     "proseWrap": "preserve"
   },
@@ -33,8 +34,8 @@
   "tasks": {
     "lint": "deno lint && deno fmt --check",
     "fix": "deno lint --fix && deno fmt",
-    "check": "deno check md2html.ts lib/*.ts",
-    "test": "deno test --allow-read --allow-write --allow-net --allow-env=VSCODE_TEXTMATE_DEBUG lib/",
+    "check": "deno check md2html.ts md2html.test.ts lib/*.ts",
+    "test": "deno test --allow-env=VSCODE_TEXTMATE_DEBUG,HOME,XDG_CACHE_HOME --allow-run=deno --allow-read lib/ md2html.test.ts",
     "build": "deno bundle -o dist/md2html md2html.ts && chmod +x dist/md2html"
   }
 }

@@ -4,10 +4,15 @@ markdown ファイルをシンタックスハイライト・mermaid 図・目次
 
 ## コマンド
 
-- `md2html <input.md> [--output <path>] [--css <path>] [--title <title>]`
+- `md2html [<input.md>] [--output <path>] [--css <path>] [--title <title>]`
+  - `<input.md>` - 入力 markdown ファイル。省略するか `-` を指定すると stdin から読む（例: `cat foo.md | md2html - --output foo.html`）。指定できるのは 1 つまでで、2 つ以上あるとエラーになる。
   - `--output` - 出力先パス。省略時は変換結果を stdout へ出す。
   - `--css` - 追記するユーザ CSS ファイルのパス。組み込みテーマ CSS の後に連結される。
-  - `--title` - 出力 HTML の `<title>`。省略時は frontmatter の `title`、それも無ければ入力ファイル名を使う。
+  - `--title` - 出力 HTML の `<title>`。省略時は frontmatter の `title`、それも無ければ入力ファイル名（stdin から読む場合は `md2html`）を使う。
+  - `--help` - 使い方を表示する。
+  - `--version` - バージョンを表示する。
+
+不明なオプションを渡すとエラー（終了コード 1）になる。
 
 frontmatter の例:
 
