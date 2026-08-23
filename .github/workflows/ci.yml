@@ -34,7 +34,17 @@ jobs:
       - name: test
         run: deno task test
 
+      # release workflow が実行する bundle をここでも通しておく。lint / check /
+      # test が通っても deno bundle だけ失敗する依存更新をタグ push より前に
+      # 検出するため。
+      - name: build
+        run: deno task build
+
       # deno.lock は deno.json の依存と対応している必要がある。上記のタスク実行で
       # 解決結果が lock に追記された場合はここで差分として検出する。
       - name: deno.lock が最新であることを確認する
-        run: git diff --exit-code deno.lock
+        run: |
+          if ! git diff --exit-code deno.lock; then
+            echo "::error::deno.lock が deno.json と対応していない。ローカルで deno task check / test を実行し、更新された deno.lock をコミットすること。"
+            exit 1
+          fi
