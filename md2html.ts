@@ -4,9 +4,10 @@
 //
 // 使い方は USAGE 定数を参照 (--help でも表示する)。
 //
-// 入力 markdown 先頭の YAML frontmatter (lib/frontmatter.ts) を解釈し、title と
-// description を出力 HTML のメタ情報へ、md2html.zoomTargets をモーダル拡大表示の
+// 入力 markdown 先頭の YAML frontmatter (lib/frontmatter.ts) を解釈し、title・
+// description・lang を出力 HTML のメタ情報へ、md2html.zoomTargets をモーダル拡大表示の
 // 対象へ反映する (未指定なら既定で画像が対象)。frontmatter ブロックは本文から除く。
+// md2html 名前空間の指定が不正なら警告を stderr へ出したうえで無視する。
 //
 // mermaid は npm:mermaid を import する browser 向けエントリ TS を子プロセスの
 // `deno bundle` でバンドルし、初回のみ ~/.cache/md2html/ (または
@@ -33,12 +34,13 @@ import denoJson from "./deno.json" with { type: "json" };
  * ファイル冒頭コメント・README・エラー出力で文面を分散させないため、ここに一本化する。
  */
 const USAGE =
-  `使い方: md2html [<input.md>] [--output <path>] [--css <path>] [--title <title>]
+  `使い方: md2html [<input.md>] [--output <path>] [--css <path>] [--title <title>] [--lang <lang>]
   <input.md>  入力 markdown ファイル。省略するか "-" を指定すると stdin から読む。
   --output    出力先パス。省略時は stdout。
   --css       追記するユーザ CSS ファイルのパス。
   --title     HTML の <title>。省略時は frontmatter の title、それも無ければ
               入力ファイル名 (stdin から読む場合は "md2html")。
+  --lang      HTML の <html lang>。省略時は frontmatter の lang、それも無ければ "ja"。
   --help      この使い方を表示する。
   --version   バージョンを表示する。`;
 
@@ -110,7 +112,7 @@ async function main(): Promise<number> {
   // 短縮フラグの塊 (`-xy`) では同じ arg で文字数分呼ばれるため Set で重複を潰す。
   const unknownOptions = new Set<string>();
   const parsed = parseArgs(Deno.args, {
-    string: ["output", "css", "title"],
+    string: ["output", "css", "title", "lang"],
     boolean: ["help", "version"],
     unknown: (arg) => {
       if (arg.startsWith("-") && arg !== "-") {
@@ -146,8 +148,13 @@ async function main(): Promise<number> {
   // parseArgs は空文字列の引数を、オプションの値として消費した場合でも "_" へ積む
   // (`--title ""` は title に "" を入れつつ "_" にも "" を積む)。この漏れ出しぶんだけを
   // 1 つ取り除き、残った空文字列は本物の位置引数 (シェル変数が空だった等) として弾く。
+  // 空値でエラーにする --output / --css は上で弾いているため、ここでは
+  // 空値を未指定扱いにするオプション (--title / --lang) のぶんだけ数える。
   const positional = parsed._.map(String);
-  if (parsed.title === "") {
+  for (const value of [parsed.title, parsed.lang]) {
+    if (value !== "") {
+      continue;
+    }
     const leaked = positional.indexOf("");
     if (leaked !== -1) {
       positional.splice(leaked, 1);
@@ -197,11 +204,16 @@ async function main(): Promise<number> {
 
   let frontmatter: Frontmatter;
   let body: string;
+  let warnings: string[];
   try {
-    ({ frontmatter, body } = parseFrontmatter(markdown));
+    ({ frontmatter, body, warnings } = parseFrontmatter(markdown));
   } catch (error) {
     console.error(`md2html: ${messageOf(error)}`);
     return 1;
+  }
+
+  for (const warning of warnings) {
+    console.error(`md2html: ${warning}`);
   }
 
   // frontmatter の title は空文字列を未指定扱いにしている (lib/frontmatter.ts)。
@@ -211,12 +223,15 @@ async function main(): Promise<number> {
     : parsed.title;
   const title = cliTitle ?? frontmatter.title ??
     (fromStdin ? "md2html" : basename(inputPath));
+  // 空の --lang も同様に未指定として扱う。
+  const lang = (parsed.lang || undefined) ?? frontmatter.lang;
 
   let html: string;
   try {
     html = await convert(body, {
       title,
       frontmatter,
+      lang,
       css,
       getMermaidJs,
       resolveImage: createImageResolver({

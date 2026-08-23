@@ -154,3 +154,86 @@ Deno.test("md2html.zoomTargets が配列でない・md2html がマッピング�
     {},
   );
 });
+
+Deno.test("lang を読み取る", () => {
+  const result = parseFrontmatter("---\nlang: en\n---\nbody\n");
+  assertEquals(result.frontmatter, { lang: "en" });
+  assertEquals(result.body, "body\n");
+});
+
+Deno.test("空文字列・非文字列の lang は未指定扱い", () => {
+  assertEquals(
+    parseFrontmatter("---\nlang: ''\n---\nbody\n").frontmatter,
+    {},
+  );
+  assertEquals(
+    parseFrontmatter("---\nlang: [en, ja]\n---\nbody\n").frontmatter,
+    {},
+  );
+});
+
+Deno.test("正しい frontmatter では警告が出ない", () => {
+  assertEquals(
+    parseFrontmatter(
+      "---\ntitle: t\nlang: en\nmd2html:\n  zoomTargets:\n    - img\n---\nbody\n",
+    ).warnings,
+    [],
+  );
+  assertEquals(parseFrontmatter("# hello\n").warnings, []);
+  assertEquals(parseFrontmatter("---\n---\nbody\n").warnings, []);
+  // md2html に既知のキーが無い場合は警告しない。
+  assertEquals(
+    parseFrontmatter("---\nmd2html:\n  other: x\n---\nbody\n").warnings,
+    [],
+  );
+});
+
+Deno.test("値の無い md2html / zoomTargets は未設定として扱い警告しない", () => {
+  const empty = parseFrontmatter("---\nmd2html:\n---\nbody\n");
+  assertEquals(empty.warnings, []);
+  assertEquals(empty.frontmatter, {});
+
+  const emptyTargets = parseFrontmatter(
+    "---\nmd2html:\n  zoomTargets:\n---\nbody\n",
+  );
+  assertEquals(emptyTargets.warnings, []);
+  assertEquals(emptyTargets.frontmatter, {});
+});
+
+Deno.test("md2html がマッピングでなければ警告する", () => {
+  assertEquals(
+    parseFrontmatter("---\nmd2html: img\n---\nbody\n").warnings,
+    ["frontmatter の md2html はマッピングでないため無視した"],
+  );
+  assertEquals(
+    parseFrontmatter("---\nmd2html:\n  - img\n---\nbody\n").warnings,
+    ["frontmatter の md2html はマッピングでないため無視した"],
+  );
+});
+
+Deno.test("md2html.zoomTargets が配列でなければ警告する", () => {
+  assertEquals(
+    parseFrontmatter("---\nmd2html:\n  zoomTargets: img\n---\nbody\n").warnings,
+    ["frontmatter の md2html.zoomTargets は配列でないため無視した"],
+  );
+});
+
+Deno.test("md2html.zoomTargets から要素が除外されたら件数を警告する", () => {
+  assertEquals(
+    parseFrontmatter(
+      '---\nmd2html:\n  zoomTargets:\n    - img\n    - ""\n    - [a]\n---\nbody\n',
+    ).warnings,
+    ["frontmatter の md2html.zoomTargets の 2 件は非空の文字列でないため除外した"],
+  );
+  // 全て除外されて空配列になる場合も警告する。
+  assertEquals(
+    parseFrontmatter('---\nmd2html:\n  zoomTargets:\n    - ""\n---\nbody\n')
+      .warnings,
+    ["frontmatter の md2html.zoomTargets の 1 件は非空の文字列でないため除外した"],
+  );
+  // 明示的な空配列は指定として正しいため警告しない。
+  assertEquals(
+    parseFrontmatter("---\nmd2html:\n  zoomTargets: []\n---\nbody\n").warnings,
+    [],
+  );
+});

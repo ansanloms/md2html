@@ -1,5 +1,19 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
-import { convert, type ConvertOptions, slugify } from "./convert.ts";
+import {
+  convert,
+  type ConvertOptions,
+  DEFAULT_LABELS,
+  DEFAULT_ZOOM_TARGETS,
+  slugify,
+  ZOOM_LABEL_KEYS,
+} from "./convert.ts";
+import { ZOOM_JS } from "./assets.ts";
+
+/** 既定の zoomTargets が JSON ブロックとして出力された形。 */
+const DEFAULT_ZOOM_TARGETS_JSON =
+  `<script type="application/json" id="md2html-zoom-targets">${
+    JSON.stringify(DEFAULT_ZOOM_TARGETS)
+  }</script>`;
 
 /** テスト用の最小 ConvertOptions。個別のテストで必要な項目だけ上書きする。 */
 function baseOptions(
@@ -170,12 +184,27 @@ Deno.test("frontmatter が無い・description が無い場合は meta descripti
 });
 
 Deno.test("header.site-header と article.md で本文が構成される", async () => {
-  const html = await convert("# hello\n", baseOptions());
+  const html = await convert(
+    "# hello\n",
+    baseOptions({ title: "ドキュメント" }),
+  );
   assertStringIncludes(
     html,
-    '<header class="site-header"><div class="inner"></div></header>',
+    '<header class="site-header"><div class="inner"><span class="brand">ドキュメント</span></div></header>',
   );
   assertStringIncludes(html, '<article class="md">');
+});
+
+Deno.test("header の brand に出す title は HTML エスケープされる", async () => {
+  const html = await convert(
+    "# hello\n",
+    baseOptions({ title: '<b>&"x"' }),
+  );
+  assertStringIncludes(
+    html,
+    '<span class="brand">&lt;b&gt;&amp;&quot;x&quot;</span>',
+  );
+  assertEquals(html.includes('<span class="brand"><b>'), false);
 });
 
 Deno.test("見出しに id が付き h2/h3 のみ TOC (aside.toc) に収集される", async () => {
@@ -398,10 +427,7 @@ Deno.test("ZOOM_JS は mermaid ブロックがあるとき注入され、既定�
     baseOptions(),
   );
   assertStringIncludes(html, 'const TARGETS_ID = "md2html-zoom-targets";');
-  assertStringIncludes(
-    html,
-    '<script type="application/json" id="md2html-zoom-targets">["img"]</script>',
-  );
+  assertStringIncludes(html, DEFAULT_ZOOM_TARGETS_JSON);
   // zoom.js は mermaid bundle より前に置かれる。
   const zoomIndex = html.indexOf(
     'const TARGETS_ID = "md2html-zoom-targets";',
@@ -465,10 +491,7 @@ Deno.test("画像があれば既定の zoomTargets (img) で ZOOM_JS と JSON �
     baseOptions(),
   );
   assertStringIncludes(html, 'const TARGETS_ID = "md2html-zoom-targets";');
-  assertStringIncludes(
-    html,
-    '<script type="application/json" id="md2html-zoom-targets">["img"]</script>',
-  );
+  assertStringIncludes(html, DEFAULT_ZOOM_TARGETS_JSON);
 });
 
 Deno.test("画像がプレースホルダに置換された場合は既定の zoomTargets では注入されない", async () => {
@@ -504,5 +527,154 @@ Deno.test("zoomTargets に空配列を明示し mermaid も無ければ ZOOM_JS 
   assertEquals(
     html.includes('const TARGETS_ID = "md2html-zoom-targets";'),
     false,
+  );
+});
+
+Deno.test("ユーザ CSS は MARKDOWN_THEME_CSS の後ろに連結される", async () => {
+  const userCss = "body { color: rebeccapurple; }";
+  const html = await convert("# hello\n", baseOptions({ css: userCss }));
+  assertStringIncludes(html, userCss);
+  const themeIndex = html.indexOf("--accent:");
+  const userIndex = html.indexOf(userCss);
+  assertEquals(themeIndex !== -1 && themeIndex < userIndex, true);
+  // どちらも同じ <style> の中に入る。
+  assertEquals(userIndex < html.indexOf("</style>"), true);
+});
+
+Deno.test("ユーザ CSS の </style> はエスケープされ style を早期終了させない", async () => {
+  const html = await convert(
+    "# hello\n",
+    baseOptions({ css: "body{color:red}</style><script>alert(1)</script>" }),
+  );
+  // style 要素の中身は `</style` までが raw text なので、閉じ側だけを潰せばよい。
+  assertStringIncludes(html, "body{color:red}<\\/style>");
+  assertEquals(html.includes("body{color:red}</style>"), false);
+});
+
+Deno.test("テーマ CSS 側も </style> のエスケープ対象になる", async () => {
+  const html = await convert(
+    "# hello\n",
+    baseOptions({ css: "/* </STYLE> */" }),
+  );
+  // 大文字小文字を問わず潰す。
+  assertStringIncludes(html, "/* <\\/STYLE> */");
+  // 出力に残る生の </style> は style 要素の閉じタグだけ。
+  assertEquals(html.split("</style>").length - 1, 1);
+});
+
+Deno.test("mermaid bundle の </script> はエスケープされ script を早期終了させない", async () => {
+  const html = await convert(
+    "```mermaid\ngraph TD\n  A --> B\n```\n",
+    baseOptions({ getMermaidJs: () => Promise.resolve("a</script>b") }),
+  );
+  assertStringIncludes(html, '<script type="module">a<\\/script>b</script>');
+});
+
+Deno.test("html lang は既定で ja、lang オプションで上書きできる", async () => {
+  const defaulted = await convert("# hello\n", baseOptions());
+  assertStringIncludes(defaulted, '<html lang="ja">');
+
+  const overridden = await convert("# hello\n", baseOptions({ lang: "en" }));
+  assertStringIncludes(overridden, '<html lang="en">');
+  assertEquals(overridden.includes('<html lang="ja">'), false);
+});
+
+Deno.test("lang は HTML エスケープされる", async () => {
+  const html = await convert("# hello\n", baseOptions({ lang: 'en"><x' }));
+  assertStringIncludes(html, '<html lang="en&quot;&gt;&lt;x">');
+});
+
+Deno.test("labels 未指定なら日本語の既定文言が使われる", async () => {
+  const html = await convert(
+    "## 見出し\n\n```ts\nconst x = 1;\n```\n\n![a](./missing.png)\n",
+    baseOptions(),
+  );
+  assertStringIncludes(html, ">コピー</button>");
+  assertStringIncludes(html, 'aria-label="目次"');
+  assertStringIncludes(
+    html,
+    '<div class="img-ph">a（画像プレースホルダ）</div>',
+  );
+});
+
+Deno.test("labels でコピー・目次・画像プレースホルダの文言を上書きできる", async () => {
+  const html = await convert(
+    "## Heading\n\n```ts\nconst x = 1;\n```\n\n![alt](./missing.png)\n\n![](./missing2.png)\n",
+    baseOptions({
+      labels: {
+        copy: "Copy",
+        toc: "Table of contents",
+        image: "Image",
+        imagePlaceholder: "{name} (missing image)",
+      },
+    }),
+  );
+  assertStringIncludes(html, ">Copy</button>");
+  assertStringIncludes(html, 'aria-label="Table of contents"');
+  assertStringIncludes(html, '<div class="img-ph">alt (missing image)</div>');
+  assertStringIncludes(html, '<div class="img-ph">Image (missing image)</div>');
+  assertEquals(html.includes("コピー</button>"), false);
+});
+
+Deno.test("labels の一部だけ上書きしても他は既定のまま", async () => {
+  const html = await convert(
+    "## 見出し\n\n```ts\nconst x = 1;\n```\n",
+    baseOptions({ labels: { copy: "Copy" } }),
+  );
+  assertStringIncludes(html, ">Copy</button>");
+  assertStringIncludes(html, 'aria-label="目次"');
+});
+
+Deno.test("labels の toc は HTML エスケープされる", async () => {
+  const html = await convert(
+    "## 見出し\n",
+    baseOptions({ labels: { toc: 'a"b' } }),
+  );
+  assertStringIncludes(html, '<aside class="toc" aria-label="a&quot;b">');
+});
+
+Deno.test("zoom.js 向けの文言を上書きすると JSON が targets/labels 形式になる", async () => {
+  const html = await convert(
+    "# h\n\n![a](https://example.com/a.png)\n",
+    baseOptions({ labels: { figure: "Figure", zoomBadge: "Expand" } }),
+  );
+  assertStringIncludes(
+    html,
+    '<script type="application/json" id="md2html-zoom-targets">{"targets":["img"],"labels":{"figure":"Figure","zoomBadge":"Expand"}}</script>',
+  );
+  assertStringIncludes(html, 'const TARGETS_ID = "md2html-zoom-targets";');
+});
+
+Deno.test("zoom.js 向けの文言を上書きしなければ JSON はセレクタの配列のまま", async () => {
+  const html = await convert(
+    "# h\n\n![a](https://example.com/a.png)\n",
+    baseOptions({ labels: { copy: "Copy" } }),
+  );
+  assertStringIncludes(html, DEFAULT_ZOOM_TARGETS_JSON);
+});
+
+Deno.test("zoom.js 向け既定文言は ZOOM_JS 側の既定と一致している", () => {
+  // 既定のままのキーは JSON へ載せず zoom.js 側の既定が使われるため、
+  // 両者がずれると出力とクライアントの表示が食い違う。
+  for (const key of ZOOM_LABEL_KEYS) {
+    assertStringIncludes(
+      ZOOM_JS,
+      `${key}:`,
+    );
+    assertStringIncludes(ZOOM_JS, JSON.stringify(DEFAULT_LABELS[key]));
+  }
+});
+
+Deno.test("zoomTargets が空でも文言の上書きがあれば JSON を出す", async () => {
+  const html = await convert(
+    "```mermaid\ngraph TD\n  A --> B\n```\n",
+    baseOptions({
+      frontmatter: { md2html: { zoomTargets: [] } },
+      labels: { figure: "Figure" },
+    }),
+  );
+  assertStringIncludes(
+    html,
+    '<script type="application/json" id="md2html-zoom-targets">{"targets":[],"labels":{"figure":"Figure"}}</script>',
   );
 });

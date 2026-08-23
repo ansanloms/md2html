@@ -189,3 +189,61 @@ title: fm-title
   assertEquals(code, 0);
   assertStringIncludes(stdout, "<title>fm-title</title>");
 });
+
+Deno.test("lang の指定が無ければ html lang は ja になる", async () => {
+  const { code, stdout } = await runCli(["-"], SIMPLE_MARKDOWN);
+  assertEquals(code, 0);
+  assertStringIncludes(stdout, '<html lang="ja">');
+});
+
+Deno.test("stdin 入力でも frontmatter の lang が html lang に反映される", async () => {
+  const markdown = `---
+lang: en
+---
+
+# 見出し
+`;
+  const { code, stdout } = await runCli(["-"], markdown);
+  assertEquals(code, 0);
+  assertStringIncludes(stdout, '<html lang="en">');
+});
+
+Deno.test("--lang は frontmatter の lang より優先される", async () => {
+  const markdown = `---
+lang: en
+---
+
+# 見出し
+`;
+  const { code, stdout } = await runCli(["--lang", "fr", "-"], markdown);
+  assertEquals(code, 0);
+  assertStringIncludes(stdout, '<html lang="fr">');
+});
+
+Deno.test('--lang "" は未指定扱いになる', async () => {
+  const markdown = `---
+lang: en
+---
+
+# 見出し
+`;
+  const { code, stdout } = await runCli(["--lang", "", "-"], markdown);
+  assertEquals(code, 0);
+  assertStringIncludes(stdout, '<html lang="en">');
+});
+
+Deno.test("frontmatter の md2html が不正なら stderr へ警告を出しつつ変換は続ける", async () => {
+  const markdown = `---
+md2html: img
+---
+
+# 見出し
+`;
+  const { code, stdout, stderr } = await runCli(["-"], markdown);
+  assertEquals(code, 0);
+  assertStringIncludes(
+    stderr,
+    "md2html: frontmatter の md2html はマッピングでないため無視した",
+  );
+  assertStringIncludes(stdout, "<h1");
+});
