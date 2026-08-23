@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v7
+
+      - name: setup deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.x"
+
+      - name: lint (deno lint + deno fmt --check)
+        run: deno task lint
+
+      - name: type check
+        run: deno task check
+
+      - name: test
+        run: deno task test
+
+      # deno.lock は deno.json の依存と対応している必要がある。上記のタスク実行で
+      # 解決結果が lock に追記された場合はここで差分として検出する。
+      - name: deno.lock が最新であることを確認する
+        run: git diff --exit-code deno.lock

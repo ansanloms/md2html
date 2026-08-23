@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    # 既存のリリースタグは `0.1.0` (v プレフィックス無し) の形式。
+    # 将来 `v0.1.0` 形式で切られた場合にも対応できるよう両方を受ける。
+    tags:
+      - "*.*.*"
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v7
+
+      - name: setup deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.x"
+
+      - name: build
+        run: deno task build
+
+      - name: 成果物を確認する
+        run: ls -la dist/md2html
+
+      # asset 名はファイル名 (md2html) がそのまま使われる。
+      # 同じタグのリリースが既にある場合は asset の差し替えのみ行う。
+      - name: GitHub Release へ添付する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "${TAG}" > /dev/null 2>&1; then
+            gh release upload "${TAG}" dist/md2html --clobber
+          else
+            gh release create "${TAG}" dist/md2html \
+              --verify-tag \
+              --title "${TAG}" \
+              --generate-notes
+          fi
