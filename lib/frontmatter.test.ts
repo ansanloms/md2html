@@ -218,6 +218,85 @@ Deno.test("md2html.zoomTargets が配列でなければ警告する", () => {
   );
 });
 
+Deno.test("md2html.mermaid.version は文字列として読み取る", () => {
+  const result = parseFrontmatter(
+    "---\nmd2html:\n  mermaid:\n    version: 11.16.0\n---\nbody\n",
+  );
+  assertEquals(result.frontmatter, {
+    md2html: { mermaid: { version: "11.16.0" } },
+  });
+  assertEquals(result.warnings, []);
+
+  const latest = parseFrontmatter(
+    "---\nmd2html:\n  mermaid:\n    version: latest\n---\nbody\n",
+  );
+  assertEquals(latest.frontmatter, {
+    md2html: { mermaid: { version: "latest" } },
+  });
+});
+
+Deno.test("md2html.zoomTargets と md2html.mermaid.version を併記すると両方入る", () => {
+  const result = parseFrontmatter(
+    "---\nmd2html:\n  zoomTargets:\n    - img\n  mermaid:\n    version: 11.16.0\n---\nbody\n",
+  );
+  assertEquals(result.frontmatter, {
+    md2html: { zoomTargets: ["img"], mermaid: { version: "11.16.0" } },
+  });
+});
+
+Deno.test("値の無い md2html.mermaid / mermaid.version は未設定として扱い警告しない", () => {
+  const noMermaid = parseFrontmatter("---\nmd2html:\n  mermaid:\n---\nbody\n");
+  assertEquals(noMermaid.frontmatter, {});
+  assertEquals(noMermaid.warnings, []);
+
+  const noVersion = parseFrontmatter(
+    "---\nmd2html:\n  mermaid:\n    version:\n---\nbody\n",
+  );
+  assertEquals(noVersion.frontmatter, {});
+  assertEquals(noVersion.warnings, []);
+
+  const emptyVersion = parseFrontmatter(
+    '---\nmd2html:\n  mermaid:\n    version: ""\n---\nbody\n',
+  );
+  assertEquals(emptyVersion.frontmatter, {});
+  assertEquals(emptyVersion.warnings, []);
+});
+
+Deno.test("md2html.mermaid がマッピングでなければ警告する", () => {
+  assertEquals(
+    parseFrontmatter("---\nmd2html:\n  mermaid: 11.16.0\n---\nbody\n")
+      .warnings,
+    ["frontmatter の md2html.mermaid はマッピングでないため無視した"],
+  );
+  assertEquals(
+    parseFrontmatter("---\nmd2html:\n  mermaid: 11.16.0\n---\nbody\n")
+      .frontmatter,
+    {},
+  );
+  assertEquals(
+    parseFrontmatter(
+      "---\nmd2html:\n  mermaid:\n    - 11.16.0\n---\nbody\n",
+    ).warnings,
+    ["frontmatter の md2html.mermaid はマッピングでないため無視した"],
+  );
+  assertEquals(
+    parseFrontmatter(
+      "---\nmd2html:\n  mermaid:\n    - 11.16.0\n---\nbody\n",
+    ).frontmatter,
+    {},
+  );
+});
+
+Deno.test("md2html.mermaid.version が文字列でなければ警告する", () => {
+  const result = parseFrontmatter(
+    "---\nmd2html:\n  mermaid:\n    version:\n      - 11.16.0\n---\nbody\n",
+  );
+  assertEquals(result.warnings, [
+    "frontmatter の md2html.mermaid.version は文字列でないため無視した",
+  ]);
+  assertEquals(result.frontmatter, {});
+});
+
 Deno.test("md2html.zoomTargets から要素が除外されたら件数を警告する", () => {
   assertEquals(
     parseFrontmatter(

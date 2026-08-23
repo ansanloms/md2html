@@ -8,6 +8,7 @@ import {
 import {
   bundleRevision,
   getMermaidBundle,
+  isValidMermaidVersion,
   MERMAID_VERSION,
   type MermaidBundleDeps,
   mermaidEntrySource,
@@ -349,4 +350,44 @@ Deno.test("getMermaidBundle: キャッシュディレクトリを決められな
     Error,
     "キャッシュディレクトリを決定できない",
   );
+});
+
+Deno.test("isValidMermaidVersion は完全一致の版・プレリリース・dist-tag を許しレンジ・空文字・パス文字を弾く", () => {
+  for (const version of ["11.16.0", "11.0.0-alpha.1", "latest", "11"]) {
+    assertEquals(isValidMermaidVersion(version), true, version);
+  }
+  for (
+    const version of [
+      "",
+      "^11",
+      "~11.1",
+      ">=11",
+      "11 12",
+      "../x",
+      '11"',
+      ".11",
+    ]
+  ) {
+    assertEquals(isValidMermaidVersion(version), false, version);
+  }
+});
+
+Deno.test("getMermaidBundle: 不正な形式の version はキャッシュ解決も bundle もせず throw する", async () => {
+  const { deps, fs, bundleCalls } = makeDeps();
+
+  await assertRejects(
+    () => getMermaidBundle(deps, "../x"),
+    Error,
+    '"../x"',
+  );
+  assertEquals(bundleCalls.length, 0);
+  assertEquals(fs.files.size, 0);
+
+  await assertRejects(
+    () => getMermaidBundle(deps, "11 || 12"),
+    Error,
+    '"11 || 12"',
+  );
+  assertEquals(bundleCalls.length, 0);
+  assertEquals(fs.files.size, 0);
 });
