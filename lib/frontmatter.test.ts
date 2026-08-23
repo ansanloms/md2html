@@ -125,14 +125,23 @@ Deno.test("md2html.zoomTargets の非文字列・空文字列の要素は除外�
   assertEquals(result.frontmatter, { md2html: { zoomTargets: ["img"] } });
 });
 
-Deno.test("md2html.zoomTargets が配列でない・空配列・md2html がマッピングでない場合は未設定", () => {
-  assertEquals(
-    parseFrontmatter("---\nmd2html:\n  zoomTargets: img\n---\nbody\n")
-      .frontmatter,
-    {},
-  );
+Deno.test("md2html.zoomTargets の空配列はそのまま保持する (既定を外す指定)", () => {
   assertEquals(
     parseFrontmatter("---\nmd2html:\n  zoomTargets: []\n---\nbody\n")
+      .frontmatter,
+    { md2html: { zoomTargets: [] } },
+  );
+  // 要素が全て除外されて空になった場合も同じ。
+  assertEquals(
+    parseFrontmatter('---\nmd2html:\n  zoomTargets:\n    - ""\n---\nbody\n')
+      .frontmatter,
+    { md2html: { zoomTargets: [] } },
+  );
+});
+
+Deno.test("md2html.zoomTargets が配列でない・md2html がマッピングでない場合は未設定", () => {
+  assertEquals(
+    parseFrontmatter("---\nmd2html:\n  zoomTargets: img\n---\nbody\n")
       .frontmatter,
     {},
   );

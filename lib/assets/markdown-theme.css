@@ -555,7 +555,7 @@ button {
   display: block;
   position: relative;
   cursor: zoom-in;
-  margin: 1.3em 0;
+  margin: 0;
   width: fit-content;
 }
 .md .img-zoom img {

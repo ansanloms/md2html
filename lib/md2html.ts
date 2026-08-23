@@ -30,7 +30,7 @@ export interface ConvertOptions {
   /**
    * 解釈済みの frontmatter (lib/frontmatter.ts の parseFrontmatter の結果)。
    * description があれば <meta name="description"> を出力し、
-   * md2html.zoomTargets があればモーダル拡大表示の対象セレクタとして埋め込む。
+   * md2html.zoomTargets があればモーダル拡大表示の対象セレクタとして埋め込む (無ければ DEFAULT_ZOOM_TARGETS)。
    * 渡す markdown は frontmatter ブロックを除いた本文であること。
    */
   frontmatter?: Frontmatter;
@@ -129,8 +129,13 @@ function rehypeMermaid(used: { value: boolean }) {
  * http(s): / data: 以外の img src を扱う rehype プラグイン。resolveImage が
  * 画像を返せば data URI へ差し替え、null を返せば (ローカルに実体が無ければ)
  * `<div class="img-ph">alt（画像プレースホルダ）</div>` へ置換する。
+ * 置換されずに img として残った要素が 1 つでもあれば used.value を true にする
+ * (zoom.js の既定対象 (img) を埋め込むかの判定に使う)。
  */
-function rehypeInlineImages(resolveImage: ConvertOptions["resolveImage"]) {
+function rehypeInlineImages(
+  resolveImage: ConvertOptions["resolveImage"],
+  used: { value: boolean },
+) {
   return async (tree: HastNode) => {
     const targets: Array<
       { node: HastNode; parent: HastNode; index: number }
@@ -156,6 +161,7 @@ function rehypeInlineImages(resolveImage: ConvertOptions["resolveImage"]) {
     for (const { node, parent, index } of targets) {
       const src = node.properties.src as string;
       if (/^(https?:|data:)/i.test(src)) {
+        used.value = true;
         continue;
       }
 
@@ -164,6 +170,7 @@ function rehypeInlineImages(resolveImage: ConvertOptions["resolveImage"]) {
         node.properties.src = `data:${resolved.mime};base64,${
           encodeBase64(resolved.data)
         }`;
+        used.value = true;
         continue;
       }
 
@@ -392,6 +399,12 @@ function escapeScriptClose(js: string): string {
 }
 
 /**
+ * frontmatter に md2html.zoomTargets が無いときのモーダル拡大対象。
+ * mermaid 図はこの指定によらず常に対象で、画像 (img) を既定で加える。
+ */
+export const DEFAULT_ZOOM_TARGETS: readonly string[] = ["img"];
+
+/**
  * `<script type="application/json">` へ埋め込む JSON の `<` `>` `&` を
  * `\uXXXX` にエスケープし、`</script` 等の混入でタグが早期終了しないようにする。
  * JSON.parse は `\u003c` を `<` に戻すため意味は変わらない。
@@ -410,6 +423,7 @@ export async function convert(
 ): Promise<string> {
   const mermaidUsed = { value: false };
   const codeBlockUsed = { value: false };
+  const imageUsed = { value: false };
   const headings: TocEntry[] = [];
 
   const file = await unified()
@@ -441,7 +455,7 @@ export async function convert(
     .use(rehypeHeadingIds, headings)
     .use(rehypeCodeBlocks, codeBlockUsed)
     .use(rehypeTableWrap)
-    .use(rehypeInlineImages, options.resolveImage)
+    .use(rehypeInlineImages, options.resolveImage, imageUsed)
     .use(rehypeStringify, { allowDangerousHtml: true })
     .process(markdown);
 
@@ -473,12 +487,19 @@ export async function convert(
     codeCopyScript = `<script>${escapeScriptClose(CODE_COPY_JS)}</script>`;
   }
 
-  // モーダル拡大表示 (zoom.js) は mermaid 図があるか zoomTargets の指定があるときだけ埋め込む。
+  // モーダル拡大表示 (zoom.js) の対象セレクタ。frontmatter に指定があればそれを使い
+  // (空配列なら画像を外して mermaid 図のみ)、無ければ既定 (img)。
+  // zoom.js は mermaid 図があるとき、セレクタを明示指定されたとき、既定適用時に
+  // img が残っているときに埋め込む (画像も mermaid も無い文書には埋め込まない)。
   // 対象セレクタは zoom.js が読む JSON ブロックとして zoom.js より前に置く。
-  const zoomTargets = options.frontmatter?.md2html?.zoomTargets ?? [];
+  const explicitTargets = options.frontmatter?.md2html?.zoomTargets;
+  const zoomTargets = explicitTargets ?? DEFAULT_ZOOM_TARGETS;
+  const zoomNeeded = mermaidUsed.value ||
+    (zoomTargets.length > 0 &&
+      (explicitTargets !== undefined || imageUsed.value));
   let zoomTargetsJson = "";
   let zoomScript = "";
-  if (mermaidUsed.value || zoomTargets.length > 0) {
+  if (zoomNeeded) {
     if (zoomTargets.length > 0) {
       zoomTargetsJson =
         `<script type="application/json" id="md2html-zoom-targets">${
