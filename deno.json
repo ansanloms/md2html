@@ -19,7 +19,7 @@
     "@std/encoding": "jsr:@std/encoding@1.0.11",
     "@std/front-matter": "jsr:@std/front-matter@1.0.9",
     "@std/path": "jsr:@std/path@1.1.6",
-    "@std/yaml": "jsr:@std/yaml@1.1.1",
+    "@std/yaml": "jsr:@std/yaml@1.2.0",
     "unified": "npm:unified@11.0.5",
     "remark-parse": "npm:remark-parse@11.0.0",
     "remark-gfm": "npm:remark-gfm@4.0.1",
