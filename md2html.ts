@@ -98,6 +98,10 @@ const mermaidBundleDeps: MermaidBundleDeps = {
   writeTextFile: (path, text) => Deno.writeTextFile(path, text),
   mkdir: (path) => Deno.mkdir(path, { recursive: true }),
   makeTempDir: () => Deno.makeTempDir(),
+  remove: (path, options) => Deno.remove(path, options),
+  rename: (from, to) => Deno.rename(from, to),
+  readDir: (path) => Deno.readDir(path),
+  denoVersion: Deno.version.deno,
   bundle,
 };
 
