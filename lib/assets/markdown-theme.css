@@ -498,6 +498,16 @@ button {
   color: var(--accent);
   border-color: var(--accent);
 }
+/* コピーできなかったとき (クリップボード API が無い / 拒否された)。 */
+.md .code-copy.copy-failed {
+  color: var(--alert-caution);
+  border-color: var(--alert-caution);
+}
+/* 成功・失敗のどちらの結果も、ホバーが外れた後やホバーの無い環境で見えるようにする。 */
+.md .code-copy.copied,
+.md .code-copy.copy-failed {
+  opacity: 1;
+}
 .md .code-block pre,
 .md pre.shiki,
 .md .code-block .fallback {
