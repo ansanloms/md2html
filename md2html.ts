@@ -5,7 +5,10 @@
 // 使い方: md2html <input.md> [--output <path>] [--css <path>] [--title <title>]
 //   --output  出力先パス。省略時は stdout。
 //   --css     追記するユーザ CSS ファイルのパス。
-//   --title   HTML の <title>。省略時は入力ファイル名。
+//   --title   HTML の <title>。省略時は frontmatter の title、それも無ければ入力ファイル名。
+//
+// 入力 markdown 先頭の YAML frontmatter (lib/frontmatter.ts) を解釈し、title と
+// description を出力 HTML のメタ情報へ反映する。frontmatter ブロックは本文から除く。
 //
 // mermaid は npm:mermaid を import する browser 向けエントリ TS を子プロセスの
 // `deno bundle` でバンドルし、初回のみ ~/.cache/md2html/ (または
@@ -19,6 +22,7 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { basename } from "@std/path";
 import { convert } from "./lib/md2html.ts";
+import { type Frontmatter, parseFrontmatter } from "./lib/frontmatter.ts";
 import { getMermaidBundle, type MermaidBundleDeps } from "./lib/mermaid.ts";
 
 const IMAGE_MIME_TYPES: Record<string, string> = {
@@ -141,12 +145,24 @@ async function main(): Promise<number> {
     }
   }
 
-  const title = parsed.title ?? basename(inputPath);
+  let frontmatter: Frontmatter;
+  let body: string;
+  try {
+    ({ frontmatter, body } = parseFrontmatter(markdown));
+  } catch (error) {
+    console.error(
+      `md2html: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return 1;
+  }
+
+  const title = parsed.title ?? frontmatter.title ?? basename(inputPath);
 
   let html: string;
   try {
-    html = await convert(markdown, {
+    html = await convert(body, {
       title,
+      frontmatter,
       css,
       getMermaidJs,
       resolveImage,

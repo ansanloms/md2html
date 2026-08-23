@@ -13,6 +13,7 @@ import { rehypeGithubAlerts } from "rehype-github-alerts";
 import { visit } from "unist-util-visit";
 import { encodeBase64 } from "@std/encoding/base64";
 import { CODE_COPY_JS, MARKDOWN_THEME_CSS } from "./assets.ts";
+import type { Frontmatter } from "./frontmatter.ts";
 
 export interface ResolvedImage {
   mime: string;
@@ -20,8 +21,18 @@ export interface ResolvedImage {
 }
 
 export interface ConvertOptions {
-  /** 出力 HTML の <title>。 */
+  /**
+   * 出力 HTML の <title>。
+   * 優先順位 (CLI --title > frontmatter title > 入力ファイル名) の解決は
+   * 呼び出し側の責務で、ここでは frontmatter.title を参照しない。
+   */
   title: string;
+  /**
+   * 解釈済みの frontmatter (lib/frontmatter.ts の parseFrontmatter の結果)。
+   * description があれば <meta name="description"> を出力する。
+   * 渡す markdown は frontmatter ブロックを除いた本文であること。
+   */
+  frontmatter?: Frontmatter;
   /** 追記するユーザ CSS (テキスト)。 */
   css?: string;
   /** mermaid ブロックがあるときだけ呼ばれる。mermaid の browser 向け bundle 本文を返す。 */
@@ -364,7 +375,7 @@ function rehypeHeadingIds(headings: TocEntry[]) {
   };
 }
 
-/** HTML エスケープ (title 埋め込み用)。 */
+/** HTML エスケープ (title・meta 等の埋め込み用)。 */
 function escapeHtml(text: string): string {
   return text
     .replaceAll("&", "&amp;")
@@ -449,6 +460,11 @@ export async function convert(
     codeCopyScript = `<script>${escapeScriptClose(CODE_COPY_JS)}</script>`;
   }
 
+  const description = options.frontmatter?.description ?? "";
+  const descriptionMeta = description === ""
+    ? ""
+    : `<meta name="description" content="${escapeHtml(description)}">`;
+
   return [
     "<!doctype html>",
     '<html lang="ja">',
@@ -456,6 +472,7 @@ export async function convert(
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>${escapeHtml(options.title)}</title>`,
+    descriptionMeta,
     "<style>",
     MARKDOWN_THEME_CSS,
     options.css ?? "",
