@@ -76,7 +76,7 @@ export const DEFAULT_LABELS: Labels = {
  * zoom.js (クライアント側) が使う文言のキー。JSON ブロックへ載せる対象。
  * 既定値のままなら JSON へ載せず zoom.js 側の既定を使うため、
  * ここの既定値は zoom.js の DEFAULT_LABELS と一致している必要がある
- * (一致は md2html.test.ts で検証する)。
+ * (一致は lib/convert.test.ts で検証する)。
  */
 export const ZOOM_LABEL_KEYS = [
   "image",

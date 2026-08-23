@@ -1,6 +1,12 @@
 {
   "$schema": "https://raw.githubusercontent.com/denoland/deno/refs/heads/main/cli/schemas/config-file.v1.json",
+  "name": "@ansanloms/md2html",
   "version": "0.1.0",
+  "exports": {
+    ".": "./mod.ts",
+    "./cli": "./cli.ts"
+  },
+  "exclude": [".claude/"],
   "fmt": {
     "proseWrap": "preserve"
   },
@@ -34,8 +40,8 @@
   "tasks": {
     "lint": "deno lint && deno fmt --check",
     "fix": "deno lint --fix && deno fmt",
-    "check": "deno check md2html.ts md2html.test.ts lib/*.ts",
-    "test": "deno test --allow-env=VSCODE_TEXTMATE_DEBUG,HOME,XDG_CACHE_HOME --allow-run=deno --allow-read lib/ md2html.test.ts",
-    "build": "deno bundle -o dist/md2html md2html.ts && chmod +x dist/md2html"
+    "check": "deno check cli.ts cli.test.ts mod.ts lib/*.ts",
+    "test": "deno test --allow-env=VSCODE_TEXTMATE_DEBUG,HOME,XDG_CACHE_HOME --allow-run=deno --allow-read lib/ cli.test.ts",
+    "build": "deno bundle -o dist/md2html cli.ts && chmod +x dist/md2html"
   }
 }

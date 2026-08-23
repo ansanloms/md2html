@@ -43,9 +43,10 @@ CLI にテーマ・目次・mermaid ズームを切り替えるオプション�
 
 ## 構成
 
-エントリポイント（`md2html.ts`）+ 依存注入した変換ロジック（`lib/convert.ts` の `convert()`）に分離している。副作用（ファイル読み書き・`deno bundle` によるバンドル生成・キャッシュ・画像解決）はエントリ側で組み立てて注入し、`lib/*.ts` はユニットテストする。
+エントリポイント（`cli.ts`）+ 依存注入した変換ロジック（`lib/convert.ts` の `convert()`）に分離している。副作用（ファイル読み書き・`deno bundle` によるバンドル生成・キャッシュ・画像解決）はエントリ側で組み立てて注入し、`lib/*.ts` はユニットテストする。
 
-- `md2html.ts` - CLI 本体。引数パース、入力/CSS ファイルの読み込み、frontmatter の解釈（`parseFrontmatter`）と `<title>` の決定、ローカル画像の解決（`resolveImage`）、mermaid bundle の取得（`getMermaidJs`、キャッシュ経由）を組み立てて `lib/convert.ts` の `convert()` へ渡す。
+- `cli.ts` - CLI 本体。引数パース、入力/CSS ファイルの読み込み、frontmatter の解釈（`parseFrontmatter`）と `<title>` の決定、ローカル画像の解決（`resolveImage`）、mermaid bundle の取得（`getMermaidJs`、キャッシュ経由）を組み立てて `lib/convert.ts` の `convert()` へ渡す。`main(args, deps)` を export し、直接実行時のみ `Deno.exit` する。
+- `mod.ts` - ライブラリとして import するための入口。`lib/convert.ts` / `lib/frontmatter.ts` / `lib/image.ts` / `lib/mermaid.ts` の公開 API を再 export する。`deno.json` の `exports` は `.` → `mod.ts`、`./cli` → `cli.ts`。
 - `lib/convert.ts` - 変換の中心ロジック。unified（remark-parse → remark-gfm → remark-rehype → rehype-raw）で markdown を hast に変換した後、mermaid ブロックの退避・shiki ハイライト（`@shikijs/rehype`）・見出し id/TOC 付与・コードブロックのラップ・テーブルのラップ・ローカル画像のインライン化・rehype-stringify を経て、テーマ CSS やスクリプトを埋め込んだ 1 枚の HTML 文字列を組み立てる。
 - `lib/frontmatter.ts` - YAML frontmatter の解釈（`@std/front-matter` で分離し、`@std/yaml` の failsafe スキーマで解析）。frontmatter ブロックを本文から切り離し、`title` / `description` / `lang` / `md2html.zoomTargets` を型付きで返す。不正な `md2html` 指定は警告文（`warnings`）として返し、CLI が stderr へ出す。CLI がこれを呼び、本文と解釈結果を `convert()` へ渡す。
 - `lib/mermaid.ts` - mermaid のブラウザ向け bundle 取得ロジック。bundle 対象（エントリ TS + `mermaid-render.js`）の内容から revision ハッシュを作ってキャッシュキーとし、キャッシュがあれば読み、無ければ一時ディレクトリにエントリを書いて `deno bundle`（呼び出し側から注入）を実行し、結果をキャッシュへ保存する。
@@ -57,9 +58,29 @@ CLI にテーマ・目次・mermaid ズームを切り替えるオプション�
 
 モジュール固有の依存（`deno.json`）は remark/rehype/shiki 系パッケージ一式（`unified` / `remark-parse` / `remark-gfm` / `remark-rehype` / `rehype-raw` / `rehype-stringify` / `@shikijs/rehype` / `unist-util-visit` / `rehype-github-alerts`）、`@std/encoding`（ローカル画像の data URI 化に使う base64 エンコード）、`@std/front-matter` / `@std/yaml`（YAML frontmatter の分離と failsafe スキーマでの解析）。
 
+## ライブラリとして使う
+
+CLI とは別に、変換ロジックを `mod.ts` からライブラリとして import できる。JSR には公開していないため、リポジトリをクローンして相対パスで import する。`mod.ts` が使う `unified` / `@std/*` 等の bare specifier はこのリポジトリの `deno.json` の `imports` で解決しているので、GitHub の raw URL 等で `mod.ts` だけを直接 import しても依存が解決できない。
+
+```ts
+import { convert, createImageResolver, parseFrontmatter } from "./mod.ts";
+import { denoDeps } from "./cli.ts";
+
+const { frontmatter, body } = parseFrontmatter(markdown);
+const html = await convert(body, {
+  title: frontmatter.title ?? "untitled",
+  frontmatter,
+  // mermaid の browser 向け bundle (JS ソース) を返す関数を注入する。
+  // Deno 上なら cli.ts の denoDeps.getMermaidJs（deno bundle + キャッシュ）をそのまま使える。
+  // 他の環境では mermaid の bundle を返す関数を自前で用意する。
+  getMermaidJs: denoDeps.getMermaidJs,
+  resolveImage: createImageResolver({ readFile: Deno.readFile }),
+});
+```
+
 ## ビルドとテスト
 
-- `deno task build` - エントリ（`md2html.ts`）を `deno bundle` で単一ファイル化し、`dist/md2html` として出力する（エントリの shebang は bundle の先頭へ引き継がれる）。
+- `deno task build` - エントリ（`cli.ts`）を `deno bundle` で単一ファイル化し、`dist/md2html` として出力する（エントリの shebang は bundle の先頭へ引き継がれる）。
 - `deno task test` - ユニットテスト（`lib/*.test.ts`）を実行する。
 - `deno task lint` / `deno task check` - lint・フォーマット検査と型検査。
 

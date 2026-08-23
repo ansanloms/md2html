@@ -20,6 +20,8 @@
 //
 // 変換ロジックは lib/convert.ts の convert() に分離し、副作用 (ファイル読み書き・
 // mermaid bundle 取得・キャッシュ) はここで組み立てて注入する。
+//
+// ライブラリとして import する場合は mod.ts を使う。
 
 import { parseArgs } from "@std/cli/parse-args";
 import { basename, dirname } from "@std/path";
@@ -89,10 +91,34 @@ const mermaidBundleDeps: MermaidBundleDeps = {
   bundle,
 };
 
-/** mermaid の browser 向け bundle を取得する。キャッシュがあればそれを読み、無ければ bundle して保存する。 */
-function getMermaidJs(): Promise<string> {
-  return getMermaidBundle(mermaidBundleDeps);
+/** CLI の副作用をまとめた依存。テストでは差し替える。 */
+export interface CliDeps {
+  /** stdin が端末 (パイプでもリダイレクトでもない) かどうか。 */
+  stdinIsTerminal: () => boolean;
+  /** stdin を最後まで読んで文字列で返す。 */
+  readStdin: () => Promise<string>;
+  readTextFile: (path: string) => Promise<string>;
+  readFile: (path: string) => Promise<Uint8Array>;
+  writeTextFile: (path: string, text: string) => Promise<void>;
+  /** mermaid の browser 向け bundle (JS ソース) を返す。 */
+  getMermaidJs: () => Promise<string>;
+  /** stdout へ 1 行書く (console.log 相当)。 */
+  log: (text: string) => void;
+  /** stderr へ 1 行書く (console.error 相当)。 */
+  error: (text: string) => void;
 }
+
+/** Deno API をそのまま使う CliDeps の実装。 */
+export const denoDeps: CliDeps = {
+  stdinIsTerminal: () => Deno.stdin.isTerminal(),
+  readStdin: () => new Response(Deno.stdin.readable).text(),
+  readTextFile: (path) => Deno.readTextFile(path),
+  readFile: (path) => Deno.readFile(path),
+  writeTextFile: (path, text) => Deno.writeTextFile(path, text),
+  getMermaidJs: () => getMermaidBundle(mermaidBundleDeps),
+  log: (text) => console.log(text),
+  error: (text) => console.error(text),
+};
 
 /** エラーメッセージ本文を取り出す。 */
 function messageOf(error: unknown): string {
@@ -100,18 +126,21 @@ function messageOf(error: unknown): string {
 }
 
 /** エラーと使い方を stderr へ出す。 */
-function usageError(message: string): number {
-  console.error(`md2html: ${message}`);
-  console.error(USAGE);
+function usageError(deps: CliDeps, message: string): number {
+  deps.error(`md2html: ${message}`);
+  deps.error(USAGE);
   return 1;
 }
 
-async function main(): Promise<number> {
+export async function main(
+  args: string[],
+  deps: CliDeps = denoDeps,
+): Promise<number> {
   // parseArgs は未知のフラグも黙って受け入れるため、unknown で拾って後段で弾く。
   // 位置引数 (key 無し) と stdin を表す "-" は正当なので対象外にする。
   // 短縮フラグの塊 (`-xy`) では同じ arg で文字数分呼ばれるため Set で重複を潰す。
   const unknownOptions = new Set<string>();
-  const parsed = parseArgs(Deno.args, {
+  const parsed = parseArgs(args, {
     string: ["output", "css", "title", "lang"],
     boolean: ["help", "version"],
     unknown: (arg) => {
@@ -123,26 +152,29 @@ async function main(): Promise<number> {
   });
 
   if (parsed.help) {
-    console.log(USAGE);
+    deps.log(USAGE);
     return 0;
   }
 
   if (parsed.version) {
-    console.log(denoJson.version);
+    deps.log(denoJson.version);
     return 0;
   }
 
   if (unknownOptions.size > 0) {
-    return usageError(`不明なオプション: ${[...unknownOptions].join(", ")}`);
+    return usageError(
+      deps,
+      `不明なオプション: ${[...unknownOptions].join(", ")}`,
+    );
   }
 
   // 値を伴わない --output / --css は parseArgs が空文字列を返す。
   // 空文字列のパスは書き込み・読み込みのどちらでも意味を持たないためエラーにする。
   if (parsed.output === "") {
-    return usageError("--output にパスを指定してください");
+    return usageError(deps, "--output にパスを指定してください");
   }
   if (parsed.css === "") {
-    return usageError("--css にパスを指定してください");
+    return usageError(deps, "--css にパスを指定してください");
   }
 
   // parseArgs は空文字列の引数を、オプションの値として消費した場合でも "_" へ積む
@@ -161,16 +193,16 @@ async function main(): Promise<number> {
     }
   }
   if (positional.includes("")) {
-    return usageError("入力ファイルのパスが空です");
+    return usageError(deps, "入力ファイルのパスが空です");
   }
   if (positional.length > 1) {
-    return usageError("入力ファイルは 1 つだけ指定してください");
+    return usageError(deps, "入力ファイルは 1 つだけ指定してください");
   }
 
   // 位置引数が無く stdin が端末 (パイプでもリダイレクトでもない) なら、
   // 無言でブロックせず使い方を出す。
-  if (positional.length === 0 && Deno.stdin.isTerminal()) {
-    return usageError("入力ファイルを指定してください");
+  if (positional.length === 0 && deps.stdinIsTerminal()) {
+    return usageError(deps, "入力ファイルを指定してください");
   }
 
   const inputPath = positional.length === 1 ? positional[0] : "-";
@@ -179,10 +211,10 @@ async function main(): Promise<number> {
   let markdown: string;
   try {
     markdown = fromStdin
-      ? await new Response(Deno.stdin.readable).text()
-      : await Deno.readTextFile(inputPath);
+      ? await deps.readStdin()
+      : await deps.readTextFile(inputPath);
   } catch (error) {
-    console.error(
+    deps.error(
       `md2html: ${fromStdin ? "stdin" : "入力ファイル"}を読み込めない: ${
         messageOf(error)
       }`,
@@ -193,9 +225,9 @@ async function main(): Promise<number> {
   let css: string | undefined;
   if (parsed.css !== undefined) {
     try {
-      css = await Deno.readTextFile(parsed.css);
+      css = await deps.readTextFile(parsed.css);
     } catch (error) {
-      console.error(
+      deps.error(
         `md2html: CSS ファイルを読み込めない: ${messageOf(error)}`,
       );
       return 1;
@@ -208,12 +240,12 @@ async function main(): Promise<number> {
   try {
     ({ frontmatter, body, warnings } = parseFrontmatter(markdown));
   } catch (error) {
-    console.error(`md2html: ${messageOf(error)}`);
+    deps.error(`md2html: ${messageOf(error)}`);
     return 1;
   }
 
   for (const warning of warnings) {
-    console.error(`md2html: ${warning}`);
+    deps.error(`md2html: ${warning}`);
   }
 
   // frontmatter の title は空文字列を未指定扱いにしている (lib/frontmatter.ts)。
@@ -233,31 +265,33 @@ async function main(): Promise<number> {
       frontmatter,
       lang,
       css,
-      getMermaidJs,
+      getMermaidJs: deps.getMermaidJs,
       resolveImage: createImageResolver({
-        readFile: Deno.readFile,
+        readFile: deps.readFile,
         baseDir: dirname(inputPath),
       }),
     });
   } catch (error) {
-    console.error(`md2html: 変換に失敗した: ${messageOf(error)}`);
+    deps.error(`md2html: 変換に失敗した: ${messageOf(error)}`);
     return 1;
   }
 
   if (parsed.output !== undefined) {
     try {
-      await Deno.writeTextFile(parsed.output, html);
+      await deps.writeTextFile(parsed.output, html);
     } catch (error) {
-      console.error(
+      deps.error(
         `md2html: 出力ファイルを書き込めない: ${messageOf(error)}`,
       );
       return 1;
     }
   } else {
-    console.log(html);
+    deps.log(html);
   }
 
   return 0;
 }
 
-Deno.exit(await main());
+if (import.meta.main) {
+  Deno.exit(await main(Deno.args, denoDeps));
+}
