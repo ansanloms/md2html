@@ -12,7 +12,7 @@ import rehypeShiki from "@shikijs/rehype";
 import { rehypeGithubAlerts } from "rehype-github-alerts";
 import { visit } from "unist-util-visit";
 import { encodeBase64 } from "@std/encoding/base64";
-import { CODE_COPY_JS, MARKDOWN_THEME_CSS } from "./assets.ts";
+import { CODE_COPY_JS, MARKDOWN_THEME_CSS, ZOOM_JS } from "./assets.ts";
 import type { Frontmatter } from "./frontmatter.ts";
 
 export interface ResolvedImage {
@@ -29,7 +29,8 @@ export interface ConvertOptions {
   title: string;
   /**
    * 解釈済みの frontmatter (lib/frontmatter.ts の parseFrontmatter の結果)。
-   * description があれば <meta name="description"> を出力する。
+   * description があれば <meta name="description"> を出力し、
+   * md2html.zoomTargets があればモーダル拡大表示の対象セレクタとして埋め込む。
    * 渡す markdown は frontmatter ブロックを除いた本文であること。
    */
   frontmatter?: Frontmatter;
@@ -390,6 +391,18 @@ function escapeScriptClose(js: string): string {
   return js.replace(/<\/script/gi, "<\\/script");
 }
 
+/**
+ * `<script type="application/json">` へ埋め込む JSON の `<` `>` `&` を
+ * `\uXXXX` にエスケープし、`</script` 等の混入でタグが早期終了しないようにする。
+ * JSON.parse は `\u003c` を `<` に戻すため意味は変わらない。
+ */
+function escapeJsonForHtml(json: string): string {
+  return json
+    .replaceAll("<", "\\u003c")
+    .replaceAll(">", "\\u003e")
+    .replaceAll("&", "\\u0026");
+}
+
 /** markdown を自己完結 HTML へ変換する。 */
 export async function convert(
   markdown: string,
@@ -460,6 +473,21 @@ export async function convert(
     codeCopyScript = `<script>${escapeScriptClose(CODE_COPY_JS)}</script>`;
   }
 
+  // モーダル拡大表示 (zoom.js) は mermaid 図があるか zoomTargets の指定があるときだけ埋め込む。
+  // 対象セレクタは zoom.js が読む JSON ブロックとして zoom.js より前に置く。
+  const zoomTargets = options.frontmatter?.md2html?.zoomTargets ?? [];
+  let zoomTargetsJson = "";
+  let zoomScript = "";
+  if (mermaidUsed.value || zoomTargets.length > 0) {
+    if (zoomTargets.length > 0) {
+      zoomTargetsJson =
+        `<script type="application/json" id="md2html-zoom-targets">${
+          escapeJsonForHtml(JSON.stringify(zoomTargets))
+        }</script>`;
+    }
+    zoomScript = `<script>${escapeScriptClose(ZOOM_JS)}</script>`;
+  }
+
   const description = options.frontmatter?.description ?? "";
   const descriptionMeta = description === ""
     ? ""
@@ -485,6 +513,8 @@ export async function convert(
     tocAside,
     "</div>",
     codeCopyScript,
+    zoomTargetsJson,
+    zoomScript,
     mermaidScript,
     "</body>",
     "</html>",

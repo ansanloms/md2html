@@ -3,21 +3,21 @@
 // MermaidBundleDeps 経由で呼び出し側から注入する (clip-image.ts の
 // resolveCacheDir(env) の前例に倣う)。
 
-import { MERMAID_ZOOM_JS } from "./assets.ts";
+import { MERMAID_RENDER_JS } from "./assets.ts";
 
 /** mermaid のキャッシュ・bundle 対象に使う固定バージョン。 */
 export const MERMAID_VERSION = "11.16.0";
 
 /**
  * `deno bundle` に渡す browser 向けエントリ TS のソースを生成する。
- * npm:mermaid と ./mermaid-zoom.js を import し、mermaid インスタンスの
- * render・テーマ切替・パン・ズーム DOM 構築は initMermaidZoom へ委譲する。
+ * npm:mermaid と ./mermaid-render.js を import し、mermaid インスタンスの
+ * render・テーマ切替・figure.mermaid-fig の構築は initMermaid へ委譲する。
  */
 export function mermaidEntrySource(version: string): string {
   return `import mermaid from "npm:mermaid@${version}";
-import { initMermaidZoom } from "./mermaid-zoom.js";
+import { initMermaid } from "./mermaid-render.js";
 
-await initMermaidZoom(mermaid);
+await initMermaid(mermaid);
 `;
 }
 
@@ -32,12 +32,12 @@ function fnv1a32(input: string): number {
 }
 
 /**
- * mermaid entry (mermaidEntrySource) + mermaid-zoom.js の内容から
+ * mermaid entry (mermaidEntrySource) + mermaid-render.js の内容から
  * bundle のキャッシュキーに使う 8 桁 hex を作る。これらの内容が変わったら
  * (このライブラリの更新で) 古いキャッシュを再利用してしまわないようにする。
  */
 export function bundleRevision(version: string): string {
-  const content = mermaidEntrySource(version) + MERMAID_ZOOM_JS;
+  const content = mermaidEntrySource(version) + MERMAID_RENDER_JS;
   return fnv1a32(content).toString(16).padStart(8, "0");
 }
 
@@ -62,8 +62,8 @@ export interface MermaidBundleDeps {
 /**
  * mermaid の browser 向け bundle を取得する。キャッシュ
  * (`<cacheDir>/mermaid-<version>-<revision>.bundle.js`) が在ればそれを返し、
- * 無ければ一時ディレクトリにエントリ TS と mermaid-zoom.js を書いて
- * bundle し、キャッシュへ保存してから返す。revision はエントリ・mermaid-zoom.js
+ * 無ければ一時ディレクトリにエントリ TS と mermaid-render.js を書いて
+ * bundle し、キャッシュへ保存してから返す。revision はエントリ・mermaid-render.js
  * の内容から作るため、これらの内容が変わると別キャッシュになる。bundle の
  * 失敗はそのまま throw する (握りつぶさない)。
  */
@@ -84,7 +84,7 @@ export async function getMermaidBundle(
   const tempDir = await deps.makeTempDir();
   const entryPath = `${tempDir}/mermaid-entry.ts`;
   await deps.writeTextFile(entryPath, mermaidEntrySource(version));
-  await deps.writeTextFile(`${tempDir}/mermaid-zoom.js`, MERMAID_ZOOM_JS);
+  await deps.writeTextFile(`${tempDir}/mermaid-render.js`, MERMAID_RENDER_JS);
 
   await deps.mkdir(cacheDir);
   await deps.bundle(entryPath, cachePath);

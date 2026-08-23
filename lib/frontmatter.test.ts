@@ -107,3 +107,41 @@ Deno.test("不正な YAML はエラーになる", () => {
     "frontmatter の YAML を解析できない",
   );
 });
+
+Deno.test("md2html.zoomTargets は非空文字列の配列として読み取る", () => {
+  const result = parseFrontmatter(
+    '---\ntitle: t\nmd2html:\n  zoomTargets:\n    - img\n    - "table"\n---\nbody\n',
+  );
+  assertEquals(result.frontmatter, {
+    title: "t",
+    md2html: { zoomTargets: ["img", "table"] },
+  });
+});
+
+Deno.test("md2html.zoomTargets の非文字列・空文字列の要素は除外される", () => {
+  const result = parseFrontmatter(
+    '---\nmd2html:\n  zoomTargets:\n    - img\n    - ""\n    - [a]\n    - {k: v}\n---\nbody\n',
+  );
+  assertEquals(result.frontmatter, { md2html: { zoomTargets: ["img"] } });
+});
+
+Deno.test("md2html.zoomTargets が配列でない・空配列・md2html がマッピングでない場合は未設定", () => {
+  assertEquals(
+    parseFrontmatter("---\nmd2html:\n  zoomTargets: img\n---\nbody\n")
+      .frontmatter,
+    {},
+  );
+  assertEquals(
+    parseFrontmatter("---\nmd2html:\n  zoomTargets: []\n---\nbody\n")
+      .frontmatter,
+    {},
+  );
+  assertEquals(
+    parseFrontmatter("---\nmd2html: img\n---\nbody\n").frontmatter,
+    {},
+  );
+  assertEquals(
+    parseFrontmatter("---\nmd2html:\n  - img\n---\nbody\n").frontmatter,
+    {},
+  );
+});

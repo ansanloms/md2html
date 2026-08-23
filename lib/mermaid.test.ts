@@ -12,13 +12,13 @@ Deno.test("mermaidEntrySource は pin 済みの npm:mermaid 指定子を含む",
   assertStringIncludes(source, 'import mermaid from "npm:mermaid@11.16.0";');
 });
 
-Deno.test("mermaidEntrySource は ./mermaid-zoom.js の initMermaidZoom を呼ぶ", () => {
+Deno.test("mermaidEntrySource は ./mermaid-render.js の initMermaid を呼ぶ", () => {
   const source = mermaidEntrySource("11.16.0");
   assertStringIncludes(
     source,
-    'import { initMermaidZoom } from "./mermaid-zoom.js";',
+    'import { initMermaid } from "./mermaid-render.js";',
   );
-  assertStringIncludes(source, "await initMermaidZoom(mermaid);");
+  assertStringIncludes(source, "await initMermaid(mermaid);");
 });
 
 Deno.test("resolveCacheDir は XDG_CACHE_HOME を優先する", () => {
@@ -94,7 +94,7 @@ Deno.test("getMermaidBundle: キャッシュが無ければ bundle して保存�
   assertStringIncludes(entryPath, "/tmp/md2html-test");
 });
 
-Deno.test("getMermaidBundle: 一時ディレクトリへ mermaid-zoom.js を書き出す (panzoom.js は書かない)", async () => {
+Deno.test("getMermaidBundle: 一時ディレクトリへ mermaid-render.js を書き出す (zoom.js は書かない)", async () => {
   const { deps } = makeDeps();
   const files: Record<string, string> = {};
   const writeTextFile = deps.writeTextFile;
@@ -106,10 +106,10 @@ Deno.test("getMermaidBundle: 一時ディレクトリへ mermaid-zoom.js を書�
   await getMermaidBundle(deps, "11.16.0");
 
   assertStringIncludes(
-    files["/tmp/md2html-test/mermaid-zoom.js"] ?? "",
-    "initMermaidZoom",
+    files["/tmp/md2html-test/mermaid-render.js"] ?? "",
+    "initMermaid",
   );
-  assertEquals("/tmp/md2html-test/panzoom.js" in files, false);
+  assertEquals("/tmp/md2html-test/zoom.js" in files, false);
 });
 
 Deno.test("getMermaidBundle: bundle の失敗は throw で伝播する", async () => {
