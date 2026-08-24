@@ -1,6 +1,8 @@
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import {
+  assembleHtml,
   convert,
+  convertFragment,
   type ConvertOptions,
   DEFAULT_LABELS,
   DEFAULT_ZOOM_TARGETS,
@@ -677,4 +679,128 @@ Deno.test("zoomTargets が空でも文言の上書きがあれば JSON を出す
     html,
     '<script type="application/json" id="md2html-zoom-targets">{"targets":[],"labels":{"figure":"Figure"}}</script>',
   );
+});
+
+Deno.test("convertFragment: 段落だけの markdown では needs が全て false で zoomConfig は null", async () => {
+  const fragment = await convertFragment("本文だけ。\n", {
+    resolveImage: () => Promise.resolve(null),
+  });
+  assertEquals(fragment.needs, {
+    mermaid: false,
+    codeCopy: false,
+    zoom: false,
+  });
+  assertEquals(fragment.zoomConfig, null);
+  assertEquals(fragment.headings, []);
+  assertEquals(fragment.body.includes("<html"), false);
+  assertEquals(fragment.body.includes("<article"), false);
+  assertEquals(fragment.body.includes("<script"), false);
+});
+
+Deno.test("convertFragment: mermaid ブロックがあれば needs.mermaid が true になる", async () => {
+  const fragment = await convertFragment(
+    "```mermaid\ngraph TD\n  A --> B\n```\n",
+    { resolveImage: () => Promise.resolve(null) },
+  );
+  assertEquals(fragment.needs.mermaid, true);
+  assertStringIncludes(fragment.body, '<pre class="mermaid">');
+});
+
+Deno.test("convertFragment: フェンス付きコードブロックがあれば needs.codeCopy が true になる", async () => {
+  const fragment = await convertFragment(
+    "```ts\nconst x = 1;\n```\n",
+    { resolveImage: () => Promise.resolve(null) },
+  );
+  assertEquals(fragment.needs.codeCopy, true);
+});
+
+Deno.test("convertFragment: 画像があれば needs.zoom が true になり zoomConfig に既定の zoomTargets が入る", async () => {
+  const data = new Uint8Array([1, 2, 3]);
+  const fragment = await convertFragment(
+    "![alt](local.png)\n",
+    {
+      resolveImage: (src) =>
+        src === "local.png"
+          ? Promise.resolve({ mime: "image/png", data })
+          : Promise.resolve(null),
+    },
+  );
+  assertEquals(fragment.needs.zoom, true);
+  assertEquals(fragment.zoomConfig, DEFAULT_ZOOM_TARGETS);
+});
+
+Deno.test("convertFragment: 見出しは headings に入り、frontmatter.description が description に渡る", async () => {
+  const fragment = await convertFragment(
+    "## 見出し\n",
+    {
+      frontmatter: { description: "説明文" },
+      resolveImage: () => Promise.resolve(null),
+    },
+  );
+  assertEquals(fragment.headings.length, 1);
+  assertEquals(fragment.headings[0].id, "見出し");
+  assertEquals(fragment.headings[0].text, "見出し");
+  assertEquals(fragment.description, "説明文");
+});
+
+Deno.test("assembleHtml(convertFragment()) は convert() と同じ HTML を出力する", async () => {
+  const markdown =
+    "## 見出し\n\n```mermaid\ngraph TD\n  A --> B\n```\n\n```ts\nconst x = 1;\n```\n\n![alt](local.png)\n";
+  const frontmatter = {
+    description: "説明文",
+    md2html: { zoomTargets: ["img", "table"] },
+  };
+  const data = new Uint8Array([1, 2, 3]);
+  const resolveImage = (src: string) =>
+    src === "local.png"
+      ? Promise.resolve({ mime: "image/png", data })
+      : Promise.resolve(null);
+  const labels = { copy: "Copy" };
+  const css = "body { color: red; }";
+  const mermaidJs = "/* mermaid stub */";
+
+  const expected = await convert(markdown, {
+    title: "テスト",
+    frontmatter,
+    lang: "en",
+    labels,
+    css,
+    getMermaidJs: () => Promise.resolve(mermaidJs),
+    resolveImage,
+  });
+
+  const fragment = await convertFragment(markdown, {
+    frontmatter,
+    labels,
+    resolveImage,
+  });
+  const actual = assembleHtml(fragment, {
+    title: "テスト",
+    lang: "en",
+    labels,
+    css,
+    mermaidJs,
+  });
+
+  assertEquals(actual, expected);
+});
+
+Deno.test("assembleHtml: needs.mermaid が true で mermaidJs 未指定なら throw する", async () => {
+  const fragment = await convertFragment(
+    "```mermaid\ngraph TD\n  A --> B\n```\n",
+    { resolveImage: () => Promise.resolve(null) },
+  );
+  assertThrows(
+    () => assembleHtml(fragment, { title: "テスト" }),
+    Error,
+    "mermaidJs is required when fragment.needs.mermaid is true",
+  );
+});
+
+Deno.test('assembleHtml: lang 省略時は html lang="ja" になる', async () => {
+  const fragment = await convertFragment("# hello\n", {
+    resolveImage: () => Promise.resolve(null),
+  });
+  const html = assembleHtml(fragment, { title: "テスト" });
+  assertStringIncludes(html, '<html lang="ja">');
 });

@@ -2,13 +2,32 @@
 // CLI は cli.ts を参照。
 
 export {
+  assembleHtml,
   convert,
+  convertFragment,
   DEFAULT_LABELS,
   DEFAULT_ZOOM_TARGETS,
   slugify,
   ZOOM_LABEL_KEYS,
 } from "./lib/convert.ts";
-export type { ConvertOptions, Labels, ResolvedImage } from "./lib/convert.ts";
+export type {
+  AssembleOptions,
+  ConvertFragmentOptions,
+  ConvertFragmentResult,
+  ConvertOptions,
+  Labels,
+  NeededAssets,
+  ResolvedImage,
+  TocEntry,
+  ZoomConfig,
+} from "./lib/convert.ts";
+
+export {
+  CODE_COPY_JS,
+  MARKDOWN_THEME_CSS,
+  MERMAID_RENDER_JS,
+  ZOOM_JS,
+} from "./lib/assets.ts";
 
 export { parseFrontmatter } from "./lib/frontmatter.ts";
 export type {

@@ -372,7 +372,7 @@ function rehypeCodeBlocks(labels: Labels, used: { value: boolean }) {
 }
 
 /** 見出し 1 件分の TOC エントリ (h2/h3 のみ)。 */
-interface TocEntry {
+export interface TocEntry {
   depth: 2 | 3;
   id: string;
   text: string;
@@ -513,11 +513,67 @@ function escapeJsonForHtml(json: string): string {
     .replaceAll("&", "\\u0026");
 }
 
-/** markdown を自己完結 HTML へ変換する。 */
-export async function convert(
+/** convertFragment() が申告する、本文の表示に必要なアセット。 */
+export interface NeededAssets {
+  /** mermaid ブロックがあり、mermaid bundle (MERMAID_RENDER_JS を同梱した bundle) が必要。 */
+  mermaid: boolean;
+  /** コードブロックがあり、CODE_COPY_JS が必要。 */
+  codeCopy: boolean;
+  /** 拡大対象があり、ZOOM_JS と zoomConfig の JSON ブロックが必要。 */
+  zoom: boolean;
+}
+
+/**
+ * zoom.js が読む設定。id="md2html-zoom-targets" の
+ * `<script type="application/json">` へ JSON として埋める中身。
+ * 文言の上書きが無ければセレクタの配列そのもの、あれば
+ * `{ targets, labels }` のオブジェクトになる (zoom.js は両方を読める)。
+ */
+export type ZoomConfig =
+  | readonly string[]
+  | { targets: readonly string[]; labels: Partial<Labels> };
+
+export interface ConvertFragmentOptions {
+  /**
+   * 解釈済みの frontmatter (lib/frontmatter.ts の parseFrontmatter の結果)。
+   * description があれば description として返し、md2html.zoomTargets があれば
+   * モーダル拡大表示の対象セレクタとして使う (無ければ DEFAULT_ZOOM_TARGETS)。
+   * 渡す markdown は frontmatter ブロックを除いた本文であること。
+   */
+  frontmatter?: Frontmatter;
+  /** UI 文言の上書き。指定しないキーは DEFAULT_LABELS (日本語) のまま。 */
+  labels?: Partial<Labels>;
+  /** http(s): / data: 以外の img src を解決する。読めなければ null を返す。 */
+  resolveImage: (src: string) => Promise<ResolvedImage | null>;
+}
+
+export interface ConvertFragmentResult {
+  /** `<article class="md">` の中身。`<html>` / `<article>` / `<script>` を含まない。 */
+  body: string;
+  /** 目次の材料。組み立ては assembleHtml() か呼び出し側が行う。 */
+  headings: TocEntry[];
+  /** frontmatter の description。無ければ undefined。 */
+  description?: string;
+  /** 本文の表示に必要なアセットの申告。 */
+  needs: NeededAssets;
+  /**
+   * zoom.js に渡す設定。JSON ブロックを埋める必要が無いときは null。
+   * needs.zoom が false のときのほか、needs.zoom が true でも対象セレクタが空で
+   * 文言の上書きも無いとき (mermaid 図のみを拡大対象にする場合) は null になる。
+   * null でも needs.zoom が true なら zoom.js 自体は読み込むこと。
+   */
+  zoomConfig: ZoomConfig | null;
+}
+
+/**
+ * markdown を本文フラグメント (本文 HTML + 目次材料 + 必要アセットの申告 + zoom 設定)
+ * へ変換する。mermaid bundle の取得には関与しない (mermaid ブロックの有無は
+ * needs.mermaid で申告するだけで、bundle 本体は呼び出し側が別途用意する)。
+ */
+export async function convertFragment(
   markdown: string,
-  options: ConvertOptions,
-): Promise<string> {
+  options: ConvertFragmentOptions,
+): Promise<ConvertFragmentResult> {
   const mermaidUsed = { value: false };
   const codeBlockUsed = { value: false };
   const imageUsed = { value: false };
@@ -559,16 +615,84 @@ export async function convert(
 
   const body = String(file);
 
+  // モーダル拡大表示 (zoom.js) の対象セレクタ。frontmatter に指定があればそれを使い
+  // (空配列なら画像を外して mermaid 図のみ)、無ければ既定 (img)。
+  // zoom.js は mermaid 図があるとき、セレクタを明示指定されたとき、既定適用時に
+  // img が残っているときに必要になる。
+  const explicitTargets = options.frontmatter?.md2html?.zoomTargets;
+  const zoomTargets = explicitTargets ?? DEFAULT_ZOOM_TARGETS;
+  const zoomNeeded = mermaidUsed.value ||
+    (zoomTargets.length > 0 &&
+      (explicitTargets !== undefined || imageUsed.value));
+  // zoom.js の文言。既定のままなら JSON へ載せない (zoom.js 側の既定が使われる)。
+  const zoomLabels: Partial<Labels> = {};
+  for (const key of ZOOM_LABEL_KEYS) {
+    if (labels[key] !== DEFAULT_LABELS[key]) {
+      zoomLabels[key] = labels[key];
+    }
+  }
+  const hasZoomLabels = Object.keys(zoomLabels).length > 0;
+  let zoomConfig: ZoomConfig | null = null;
+  if (zoomNeeded && (zoomTargets.length > 0 || hasZoomLabels)) {
+    zoomConfig = hasZoomLabels
+      ? { targets: zoomTargets, labels: zoomLabels }
+      : zoomTargets;
+  }
+
+  return {
+    body,
+    headings,
+    description: options.frontmatter?.description,
+    needs: {
+      mermaid: mermaidUsed.value,
+      codeCopy: codeBlockUsed.value,
+      zoom: zoomNeeded,
+    },
+    zoomConfig,
+  };
+}
+
+export interface AssembleOptions {
+  /** 出力 HTML の `<title>`。 */
+  title: string;
+  /** 出力 HTML の `<html lang>`。省略時は "ja"。 */
+  lang?: string;
+  /** テーマ CSS の後に連結する追加 CSS (テキスト)。 */
+  css?: string;
+  /**
+   * 目次の文言 (toc) の上書き。assembleHtml() が使うのはこのキーだけで、
+   * コードのコピーボタンや画像・zoom の文言は convertFragment() の labels で
+   * 本文と zoomConfig に反映済みになる。両方に同じ labels を渡すこと。
+   */
+  labels?: Partial<Labels>;
+  /** fragment.needs.mermaid のとき必須。`<script type="module">` として埋め込む mermaid bundle 文字列。 */
+  mermaidJs?: string;
+}
+
+/** convertFragment() の結果から、現行 convert() と同じ単一 HTML を組み立てる。 */
+export function assembleHtml(
+  fragment: ConvertFragmentResult,
+  options: AssembleOptions,
+): string {
+  if (fragment.needs.mermaid && options.mermaidJs === undefined) {
+    throw new Error(
+      "mermaidJs is required when fragment.needs.mermaid is true",
+    );
+  }
+
+  const labels: Labels = { ...DEFAULT_LABELS, ...options.labels };
+
   let mermaidScript = "";
-  if (mermaidUsed.value) {
-    const js = await options.getMermaidJs();
-    mermaidScript = `<script type="module">${escapeScriptClose(js)}</script>`;
+  if (fragment.needs.mermaid) {
+    mermaidScript = `<script type="module">${
+      escapeScriptClose(options.mermaidJs ?? "")
+    }</script>`;
   }
 
   let layoutStyle = "";
   let tocAside = "";
-  if (headings.length > 0) {
-    const items = headings
+  if (fragment.headings.length > 0) {
+    const items = fragment.headings
       .map((heading) =>
         `<li><a class="lv-${heading.depth}" href="#${escapeHtml(heading.id)}">${
           escapeHtml(heading.text)
@@ -583,46 +707,24 @@ export async function convert(
   }
 
   let codeCopyScript = "";
-  if (codeBlockUsed.value) {
+  if (fragment.needs.codeCopy) {
     codeCopyScript = `<script>${escapeScriptClose(CODE_COPY_JS)}</script>`;
   }
 
-  // モーダル拡大表示 (zoom.js) の対象セレクタ。frontmatter に指定があればそれを使い
-  // (空配列なら画像を外して mermaid 図のみ)、無ければ既定 (img)。
-  // zoom.js は mermaid 図があるとき、セレクタを明示指定されたとき、既定適用時に
-  // img が残っているときに埋め込む (画像も mermaid も無い文書には埋め込まない)。
   // 対象セレクタは zoom.js が読む JSON ブロックとして zoom.js より前に置く。
-  const explicitTargets = options.frontmatter?.md2html?.zoomTargets;
-  const zoomTargets = explicitTargets ?? DEFAULT_ZOOM_TARGETS;
-  const zoomNeeded = mermaidUsed.value ||
-    (zoomTargets.length > 0 &&
-      (explicitTargets !== undefined || imageUsed.value));
-  // zoom.js の文言。既定のままなら JSON へ載せない (zoom.js 側の既定が使われる)。
-  const zoomLabels: Partial<Labels> = {};
-  for (const key of ZOOM_LABEL_KEYS) {
-    if (labels[key] !== DEFAULT_LABELS[key]) {
-      zoomLabels[key] = labels[key];
-    }
-  }
-  const hasZoomLabels = Object.keys(zoomLabels).length > 0;
   let zoomTargetsJson = "";
   let zoomScript = "";
-  if (zoomNeeded) {
-    // 文言の上書きが無ければセレクタの配列そのものを載せ、あれば
-    // { targets, labels } のオブジェクトにする (zoom.js は両方を読める)。
-    if (zoomTargets.length > 0 || hasZoomLabels) {
-      const payload = hasZoomLabels
-        ? { targets: zoomTargets, labels: zoomLabels }
-        : zoomTargets;
+  if (fragment.needs.zoom) {
+    if (fragment.zoomConfig !== null) {
       zoomTargetsJson =
         `<script type="application/json" id="md2html-zoom-targets">${
-          escapeJsonForHtml(JSON.stringify(payload))
+          escapeJsonForHtml(JSON.stringify(fragment.zoomConfig))
         }</script>`;
     }
     zoomScript = `<script>${escapeScriptClose(ZOOM_JS)}</script>`;
   }
 
-  const description = options.frontmatter?.description ?? "";
+  const description = fragment.description ?? "";
   const descriptionMeta = description === ""
     ? ""
     : `<meta name="description" content="${escapeHtml(description)}">`;
@@ -647,7 +749,7 @@ export async function convert(
       escapeHtml(options.title)
     }</span></div></header>`,
     `<div class="layout"${layoutStyle}>`,
-    `<article class="md">${body}</article>`,
+    `<article class="md">${fragment.body}</article>`,
     tocAside,
     "</div>",
     codeCopyScript,
@@ -657,4 +759,26 @@ export async function convert(
     "</body>",
     "</html>",
   ].filter((part) => part !== "").join("\n");
+}
+
+/** markdown を自己完結 HTML へ変換する。内部では convertFragment() + assembleHtml() を合成する。 */
+export async function convert(
+  markdown: string,
+  options: ConvertOptions,
+): Promise<string> {
+  const fragment = await convertFragment(markdown, {
+    frontmatter: options.frontmatter,
+    labels: options.labels,
+    resolveImage: options.resolveImage,
+  });
+  const mermaidJs = fragment.needs.mermaid
+    ? await options.getMermaidJs()
+    : undefined;
+  return assembleHtml(fragment, {
+    title: options.title,
+    lang: options.lang,
+    css: options.css,
+    labels: options.labels,
+    mermaidJs,
+  });
 }

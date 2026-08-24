@@ -50,7 +50,7 @@ CLI にテーマ・目次・mermaid ズームを切り替えるオプション�
 
 - `cli.ts` - CLI 本体。引数パース、入力/CSS ファイルの読み込み、frontmatter の解釈（`parseFrontmatter`）と `<title>` の決定、ローカル画像の解決（`resolveImage`）、mermaid bundle の取得（`getMermaidJs`、キャッシュ経由）を組み立てて `lib/convert.ts` の `convert()` へ渡す。`main(args, deps)` を export し、直接実行時のみ `Deno.exit` する。
 - `mod.ts` - ライブラリとして import するための入口。`lib/convert.ts` / `lib/frontmatter.ts` / `lib/image.ts` / `lib/mermaid.ts` の公開 API を再 export する。`deno.json` の `exports` は `.` → `mod.ts`、`./cli` → `cli.ts`。
-- `lib/convert.ts` - 変換の中心ロジック。unified（remark-parse → remark-gfm → remark-rehype → rehype-raw）で markdown を hast に変換した後、mermaid ブロックの退避・shiki ハイライト（`@shikijs/rehype`）・見出し id/TOC 付与・コードブロックのラップ・テーブルのラップ・ローカル画像のインライン化・rehype-stringify を経て、テーマ CSS やスクリプトを埋め込んだ 1 枚の HTML 文字列を組み立てる。
+- `lib/convert.ts` - 変換の中心ロジック。2 層に分かれている。`convertFragment()` は unified（remark-parse → remark-gfm → remark-rehype → rehype-raw）で markdown を hast に変換した後、mermaid ブロックの退避・shiki ハイライト（`@shikijs/rehype`）・見出し id/TOC 付与・コードブロックのラップ・テーブルのラップ・ローカル画像のインライン化・rehype-stringify を経て、本文フラグメント（`<article>` の中身）・目次材料・必要アセットの申告（`needs`）・zoom 設定（`zoomConfig`）を返す（mermaid bundle の取得には関与しない）。`assembleHtml()` はその結果からテーマ CSS やスクリプトを埋め込んだ 1 枚の HTML 文字列を組み立てる。`convert()` はこの 2 つを合成し、従来どおり markdown から単一 HTML を直接返す。
 - `lib/frontmatter.ts` - YAML frontmatter の解釈（`@std/front-matter` で分離し、`@std/yaml` の failsafe スキーマで解析）。frontmatter ブロックを本文から切り離し、`title` / `description` / `lang` / `md2html.zoomTargets` を型付きで返す。不正な `md2html` 指定は警告文（`warnings`）として返し、CLI が stderr へ出す。CLI がこれを呼び、本文と解釈結果を `convert()` へ渡す。
 - `lib/mermaid.ts` - mermaid のブラウザ向け bundle 取得ロジック。bundle 対象（エントリ TS + `mermaid-render.js`）の内容から revision ハッシュを作ってキャッシュキーとし、キャッシュがあれば読み、無ければ一時ディレクトリにエントリを書いて `deno bundle`（呼び出し側から注入）を実行し、結果をキャッシュへ保存する。
 - `lib/assets.ts` - `lib/assets/` 配下の CSS / JS を `with { type: "text" }` のテキスト import で取り込み、文字列定数として export するアグリゲータ。
@@ -86,6 +86,45 @@ const html = await convert(body, {
   resolveImage: createImageResolver({ readFile: Deno.readFile }),
 });
 ```
+
+### 2 層 API（`convertFragment()` / `assembleHtml()`）
+
+`convert()` は上記のとおり markdown から単一 HTML を返すが、これは内部で `convertFragment()` と `assembleHtml()` を合成したものにすぎない。この 2 つを個別に呼ぶこともでき、`convertFragment()` は本文フラグメント（`body`）・目次材料（`headings`）・本文の表示に必要なアセットの申告（`needs`）・zoom 設定（`zoomConfig`）を返すだけで、`<html>` / `<article>` / `<script>` を含む HTML の組み立てや mermaid bundle の取得を行わない。
+
+Chrome extension（Manifest V3）の extension ページのように、CSP（`script-src 'self'`）でインライン `<script>` が実行できない環境では、この層 1 の API を使う。`needs` を見て、必要なアセット（`CODE_COPY_JS` / `ZOOM_JS` / mermaid bundle）を `'self'` 配信の別ファイルとして読み込み、`zoomConfig` は `id="md2html-zoom-targets"` の `<script type="application/json">` に JSON として埋める。`zoomConfig` が null のときは JSON ブロックを省略する（`needs.zoom` が true なら `ZOOM_JS` は読み込む）。
+
+```ts
+import {
+  CODE_COPY_JS,
+  convertFragment,
+  createImageResolver,
+  ZOOM_JS,
+} from "./mod.ts";
+
+const fragment = await convertFragment(body, {
+  frontmatter,
+  resolveImage: createImageResolver({ readFile: Deno.readFile }),
+});
+
+// fragment.body を <article class="md"> 相当の場所へ挿入する。
+// fragment.headings から目次を組み立てる（または assembleHtml() に任せる）。
+// fragment.needs に従い、必要なアセットのみを 'self' 配信の別ファイルとして読み込む。
+if (fragment.needs.codeCopy) {
+  // CODE_COPY_JS を <script src="..."> ではなく extension 側の別ファイルとして配置し読み込む。
+}
+if (fragment.needs.zoom) {
+  // ZOOM_JS を別ファイルとして読み込む。
+  if (fragment.zoomConfig !== null) {
+    // <script type="application/json" id="md2html-zoom-targets"> に
+    // JSON.stringify(fragment.zoomConfig) を埋める（ZOOM_JS より前に置く）。
+  }
+}
+if (fragment.needs.mermaid) {
+  // mermaid bundle（MERMAID_RENDER_JS を同梱したもの）を別ファイルとして読み込む。
+}
+```
+
+`assembleHtml(fragment, options)` は `convertFragment()` の結果から `convert()` と同じ単一 HTML を組み立てる。`fragment.needs.mermaid` が true のときは `options.mermaidJs`（mermaid bundle の JS ソース）が必須で、無いと throw する。`labels` は目次の文言にしか使わないため、文言を上書きするときは `convertFragment()` にも同じ `labels` を渡す。
 
 ## ビルドとテスト
 
