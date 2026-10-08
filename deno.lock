@@ -14,7 +14,7 @@
     "jsr:@std/toml@^1.0.3": "1.0.11",
     "jsr:@std/yaml@1.2.0": "1.2.0",
     "jsr:@std/yaml@^1.0.5": "1.2.0",
-    "npm:@shikijs/rehype@4.4.3": "4.4.3",
+    "npm:@shikijs/rehype@4.5.0": "4.5.0",
     "npm:rehype-github-alerts@4.2.0": "4.2.0",
     "npm:rehype-raw@7.0.0": "7.0.0",
     "npm:rehype-stringify@10.0.1": "10.0.1",
@@ -83,8 +83,8 @@
         "object-assign"
       ]
     },
-    "@shikijs/core@4.4.3": {
-      "integrity": "sha512-QCR4q2ZO/ILJEuwiBMel4wdcTDb1JGwfjKTxPDF6x8ixOaluPrVqIn06C99AcRPhmYlBR56d/Fb+GN58GzExpg==",
+    "@shikijs/core@4.5.0": {
+      "integrity": "sha512-6CIgwq+bt2JZ3OSjb/nBkkwEf/CfpHcbam+Mg5Pllco7HAGRQ2/EFhZrrJtbyNTgKwknfVS+llsXGygiDGwJWw==",
       "dependencies": [
         "@shikijs/primitive",
         "@shikijs/types",
@@ -93,37 +93,37 @@
         "hast-util-to-html"
       ]
     },
-    "@shikijs/engine-javascript@4.4.3": {
-      "integrity": "sha512-FbOjFJp9VLdo1Wevs10BBtVxiTWwNLqZh5Gkhjgda/ioL15YOgeSl9n+6XMa3qRlPQzfhFNe641SrynFHYG0nQ==",
+    "@shikijs/engine-javascript@4.5.0": {
+      "integrity": "sha512-Ed6UdEj84LyYkwnxM5CvSMWAD+id9ExTYri0/+x41U9zrgNifPSS9lZm0JqBP0VfYI8yr8tY5nbNq9+p9R0kFA==",
       "dependencies": [
         "@shikijs/types",
         "@shikijs/vscode-textmate",
         "oniguruma-to-es"
       ]
     },
-    "@shikijs/engine-oniguruma@4.4.3": {
-      "integrity": "sha512-EcOQkxdxGQrc1Row/cC2c96/v1dbZqGnEVu1qTuT/MJmp6+cXCvQussowVmCv5Tqr3KuY3c7IbM6HTW3LJ1k9w==",
+    "@shikijs/engine-oniguruma@4.5.0": {
+      "integrity": "sha512-dKVmbJecVdB9recl8a/CU4jdpNXyjJQrIcesIkpS70s5HS02ohpnCSpMUbotPnEUzbAcLQ+S4hwZYbkBBiTcJw==",
       "dependencies": [
         "@shikijs/types",
         "@shikijs/vscode-textmate"
       ]
     },
-    "@shikijs/langs@4.4.3": {
-      "integrity": "sha512-ePic0yfAJGOF83D5wBHK/00EjK65oahBYxFk5epgq33WRv7X9UuxLEV8PtR0szC0z8dl7INIpIodB99JRFlR+A==",
+    "@shikijs/langs@4.5.0": {
+      "integrity": "sha512-wwBTqwduXSz0X4v9Qa2EWeFaYJEw1clCncWjoRNQRbVDu3SPRTRWucnouYapKj3b8Q+sk/41Vbc4B5c8nuYzLA==",
       "dependencies": [
         "@shikijs/types"
       ]
     },
-    "@shikijs/primitive@4.4.3": {
-      "integrity": "sha512-m0wBeLDQDeIxRdUmrCPdQqfuUamDwRL5isCfYbguKD6NiaKpVbsv+3J81DyIKgNW5h4WAIIr8T4EkgQrBBxvaQ==",
+    "@shikijs/primitive@4.5.0": {
+      "integrity": "sha512-UM7ShlA8oz0OWxLLO8BmO9Ip6fVqdkt8yF0EH7nOCqHfrx1eEAzF0ZUVK7L+I8NEgeu1PEWSRlxaiPPeCb4iDg==",
       "dependencies": [
         "@shikijs/types",
         "@shikijs/vscode-textmate",
         "@types/hast"
       ]
     },
-    "@shikijs/rehype@4.4.3": {
-      "integrity": "sha512-vkG9jG1aRnrx05R31uAOKQHE8qpY7r1cBXE2sAZgFK2IaPnQHwaP4L1C6amQixmZ8thBsKwfbSsYxMDoo46UWQ==",
+    "@shikijs/rehype@4.5.0": {
+      "integrity": "sha512-+OnQqc4Pdjo4m13sBdlBrPxuylSqWwnw6qOjmLRKGf6yDr1SdhZcKFUEXFGoFRBeRSwogmZp8M3LIAO7Urmxjw==",
       "dependencies": [
         "@shikijs/types",
         "@types/hast",
@@ -133,14 +133,14 @@
         "unist-util-visit"
       ]
     },
-    "@shikijs/themes@4.4.3": {
-      "integrity": "sha512-w8UHjeUnIR965KMWJHUPXOc2mNJUnK3vpVLYLvw5IYU2mnTTJ89E24OrJDBNiJDQ0qzb0tc4l7mrIXx5cFeIyw==",
+    "@shikijs/themes@4.5.0": {
+      "integrity": "sha512-zGb87H3UBbpuI4yoh5UguB1XbU+2BDU3kflM7UfZ+Cy2hWo9lBtqjSVK20gmLY6ukYl040hAypGXMgud9vul8Q==",
       "dependencies": [
         "@shikijs/types"
       ]
     },
-    "@shikijs/types@4.4.3": {
-      "integrity": "sha512-UEJxmRR++MAGR6hugn0vgVS2W/6lWAts84FFSrnlH9sP0LNol7E5+NQ792pH8liWUhyMyjhTgSUH3k7iD7tc5g==",
+    "@shikijs/types@4.5.0": {
+      "integrity": "sha512-drtPrtD8N0DENyD2cyt6Ajy+IWsiCLgMxODwLTpvH1UsN6a9jf90tNTPjqwHvA+0Lzu9e0txk8DjfqH1p9UJRw==",
       "dependencies": [
         "@shikijs/vscode-textmate",
         "@types/hast"
@@ -811,8 +811,8 @@
         "unified"
       ]
     },
-    "shiki@4.4.3": {
-      "integrity": "sha512-Mb/GvXPHBAXdgGIcnfU5L3ldpn1XcxrGkPHwqgRx17/I2XRfqlFKk2vGkHWINn1kdXvzJZeuO3is6I9KLPFm0g==",
+    "shiki@4.5.0": {
+      "integrity": "sha512-OcRW72ngQvc+MSVWBRIovC/BTW589iUE/Vxav7VeM4RcY9MUjqB+IR6ILG1k9nuW6LiG/nct9uma4/MBtnZbmQ==",
       "dependencies": [
         "@shikijs/core",
         "@shikijs/engine-javascript",
@@ -921,7 +921,7 @@
       "jsr:@std/front-matter@1.0.9",
       "jsr:@std/path@1.1.6",
       "jsr:@std/yaml@1.2.0",
-      "npm:@shikijs/rehype@4.4.3",
+      "npm:@shikijs/rehype@4.5.0",
       "npm:rehype-github-alerts@4.2.0",
       "npm:rehype-raw@7.0.0",
       "npm:rehype-stringify@10.0.1",
