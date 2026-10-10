@@ -3,9 +3,7 @@
 // `md2html.*` 名前空間の変換オプション (zoomTargets) も frontmatter で持ち、
 // パース結果は呼び出し側から convert() へ渡す。
 
-import { extract } from "@std/front-matter/yaml";
-import { test } from "@std/front-matter/test";
-import { parse } from "@std/yaml";
+import { parse } from "yaml";
 
 /** frontmatter の `md2html` 名前空間で指定する変換オプション。 */
 export interface Md2htmlOptions {
@@ -64,6 +62,39 @@ function nonEmptyString(value: unknown): string | undefined {
 }
 
 /**
+ * 先頭が `---` 行 (LF / CRLF) で始まり、次の `---` / `...` 行で閉じる区間を frontmatter として切り出す。
+ * 開き行・閉じ行とも末尾の空白 (スペース・タブ) を許容する。
+ * 閉じる行が無い・先頭に空行等があって `---` 行で始まらない場合は null。
+ */
+function splitFrontmatter(
+  markdown: string,
+): { frontMatter: string; body: string } | null {
+  const opening = /^---[ \t]*\r?\n/.exec(markdown);
+  if (opening === null) {
+    return null;
+  }
+
+  const rest = markdown.slice(opening[0].length);
+  let lineStart = 0;
+  while (lineStart <= rest.length) {
+    const newline = rest.indexOf("\n", lineStart);
+    const lineEnd = newline === -1 ? rest.length : newline;
+    const line = rest.slice(lineStart, lineEnd).replace(/\r$/, "");
+    if (/^(---|\.\.\.)[ \t]*$/.test(line)) {
+      return {
+        frontMatter: rest.slice(0, lineStart).replace(/\r?\n$/, ""),
+        body: newline === -1 ? "" : rest.slice(newline + 1),
+      };
+    }
+    if (newline === -1) {
+      break;
+    }
+    lineStart = newline + 1;
+  }
+  return null;
+}
+
+/**
  * markdown 先頭の YAML frontmatter を解釈し、本文と分離する。
  *
  * - 先頭が `---` で始まる frontmatter ブロックが無ければ、frontmatter は空、本文は入力そのまま。
@@ -78,21 +109,20 @@ function nonEmptyString(value: unknown): string | undefined {
  *   (先頭の `---` 水平線を frontmatter と誤認して本文を欠落させないため)。
  * - YAML として解析できない場合は原因を含む Error を throw する。
  */
-export function parseFrontmatter(markdown: string): ParsedMarkdown {
-  if (!test(markdown, ["yaml"])) {
+export function parseFrontmatter(input: string): ParsedMarkdown {
+  // 先頭の UTF-8 BOM は frontmatter の判定を妨げるため、1 つだけ除去する。
+  const markdown = input.startsWith("\uFEFF") ? input.slice(1) : input;
+  const split = splitFrontmatter(markdown);
+  if (split === null) {
     return { frontmatter: {}, body: markdown, warnings: [] };
   }
 
-  let frontMatter: string;
-  let body: string;
+  const { frontMatter, body } = split;
   let attrs: unknown;
   try {
-    // extract は分割と同時に core スキーマで YAML を解析するため不正な YAML で throw する。
-    // スカラを文字どおり保つため、分割結果の frontMatter を failsafe スキーマで解析し直す。
-    ({ frontMatter, body } = extract<unknown>(markdown));
-    attrs = frontMatter === ""
-      ? {}
-      : parse(frontMatter, { schema: "failsafe" });
+    // スカラを文字どおり保つため failsafe スキーマで解析する。
+    attrs =
+      frontMatter === "" ? {} : parse(frontMatter, { schema: "failsafe" });
   } catch (error) {
     throw new Error(
       `frontmatter の YAML を解析できない: ${
@@ -131,9 +161,7 @@ export function parseFrontmatter(markdown: string): ParsedMarkdown {
   // 値の無いキー (`md2html:` だけ書いた等) は未設定として扱い、警告もしない。
   if (!isEmptyValue(md2html)) {
     if (typeof md2html !== "object" || Array.isArray(md2html)) {
-      warnings.push(
-        "frontmatter の md2html はマッピングでないため無視した",
-      );
+      warnings.push("frontmatter の md2html はマッピングでないため無視した");
     } else {
       const rawTargets = (md2html as Record<string, unknown>).zoomTargets;
       if (isEmptyValue(rawTargets)) {

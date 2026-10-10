@@ -2,14 +2,14 @@
 //
 // 変換ロジックそのものは lib/convert.test.ts が検証するので、ここでは CLI の
 // 引数解釈・終了コード・stdin 入力といった実行時の振る舞いだけを見る。
-// mermaid ブロックは含めない (含めると子プロセスが `deno bundle` を走らせる)。
+// mermaid ブロックは含めない (含めると子プロセスが jsdelivr へ取得に行く)。
 
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { dirname, fromFileUrl } from "@std/path";
+import { expect, test } from "bun:test";
+import { dirname } from "node:path";
 import { type CliDeps, main } from "./cli.ts";
 import { MERMAID_VERSION } from "./lib/mermaid.ts";
 
-const CLI_PATH = fromFileUrl(new URL("./cli.ts", import.meta.url));
+const CLI_PATH = new URL("./cli.ts", import.meta.url).pathname;
 const REPO_ROOT = dirname(CLI_PATH);
 
 interface CliResult {
@@ -20,39 +20,24 @@ interface CliResult {
 
 /** cli.ts を子プロセスとして実行する。stdin を渡すとパイプ入力になる。 */
 async function runCli(args: string[], stdin?: string): Promise<CliResult> {
-  const child = new Deno.Command("deno", {
-    args: ["run", "--quiet", "--allow-all", CLI_PATH, ...args],
+  const proc = Bun.spawn(["bun", "run", CLI_PATH, ...args], {
     cwd: REPO_ROOT,
-    stdin: stdin === undefined ? "null" : "piped",
-    stdout: "piped",
-    stderr: "piped",
-  }).spawn();
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
 
   if (stdin !== undefined) {
-    const writer = child.stdin.getWriter();
-    await writer.write(new TextEncoder().encode(stdin));
-    await writer.close();
+    proc.stdin.write(stdin);
   }
+  proc.stdin.end();
 
-  const { code, stdout, stderr } = await child.output();
-  const decoder = new TextDecoder();
-  return {
-    code,
-    stdout: decoder.decode(stdout),
-    stderr: decoder.decode(stderr),
-  };
-}
-
-/**
- * shebang 行 (`#!/usr/bin/env -S deno run ...`) が指定している deno のフラグを読む。
- * 配布形態の権限セットをテストから直接使うためのもので、ここが実際の実行時権限になる。
- */
-async function shebangDenoFlags(): Promise<string[]> {
-  const firstLine = (await Deno.readTextFile(CLI_PATH)).split("\n")[0];
-  const tokens = firstLine.replace(/^#!\s*/, "").split(/\s+/);
-  const runAt = tokens.indexOf("run");
-  assert(runAt !== -1, `shebang に deno run が無い: ${firstLine}`);
-  return tokens.slice(runAt + 1);
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  const code = await proc.exited;
+  return { code, stdout, stderr };
 }
 
 const SIMPLE_MARKDOWN = `# 見出し
@@ -65,66 +50,66 @@ const SIMPLE_MARKDOWN = `# 見出し
 - b
 `;
 
-Deno.test("--help は使い方を stdout に出して 0 で終わる", async () => {
+test("--help は使い方を stdout に出して 0 で終わる", async () => {
   const { code, stdout } = await runCli(["--help"]);
-  assertEquals(code, 0);
-  assertStringIncludes(stdout, "使い方: md2html");
-  assertStringIncludes(stdout, "--version");
-  assertStringIncludes(stdout, "--mermaid-version");
+  expect(code).toEqual(0);
+  expect(stdout).toContain("使い方: md2html");
+  expect(stdout).toContain("--version");
+  expect(stdout).toContain("--mermaid-version");
 });
 
-Deno.test("--version は deno.json の version を stdout に出して 0 で終わる", async () => {
+test("--version は package.json の version を stdout に出して 0 で終わる", async () => {
   const { code, stdout } = await runCli(["--version"]);
-  assertEquals(code, 0);
-  assertEquals(stdout.trim(), "0.1.0");
+  expect(code).toEqual(0);
+  expect(stdout.trim()).toEqual("0.1.0");
 });
 
-Deno.test("未知のオプションはエラーになる", async () => {
+test("未知のオプションはエラーになる", async () => {
   const { code, stderr } = await runCli(["--bogus", "x", "input.md"]);
-  assertEquals(code, 1);
-  assertStringIncludes(stderr, "不明なオプション: --bogus");
-  assertStringIncludes(stderr, "使い方: md2html");
+  expect(code).toEqual(1);
+  expect(stderr).toContain("不明なオプション: --bogus");
+  expect(stderr).toContain("使い方: md2html");
 });
 
-Deno.test("存在しない入力ファイルはエラーになる", async () => {
+test("存在しない入力ファイルはエラーになる", async () => {
   const { code, stderr } = await runCli(["does-not-exist-4f2a.md"]);
-  assertEquals(code, 1);
-  assertStringIncludes(stderr, "入力ファイルを読み込めない");
+  expect(code).toEqual(1);
+  expect(stderr).toContain("入力ファイルを読み込めない");
 });
 
-Deno.test("位置引数が 2 つ以上あるとエラーになる", async () => {
+test("位置引数が 2 つ以上あるとエラーになる", async () => {
   const { code, stderr } = await runCli(["a.md", "b.md"]);
-  assertEquals(code, 1);
-  assertStringIncludes(stderr, "入力ファイルは 1 つだけ");
+  expect(code).toEqual(1);
+  expect(stderr).toContain("入力ファイルは 1 つだけ");
 });
 
-Deno.test("--output に値が無いとエラーになる", async () => {
+test("--output に値が無いとエラーになる", async () => {
   const { code, stderr } = await runCli(["a.md", "--output"]);
-  assertEquals(code, 1);
-  assertStringIncludes(stderr, "--output にパスを指定してください");
+  expect(code).toEqual(1);
+  expect(stderr).toContain("--output にパスを指定してください");
 });
 
-Deno.test("--css に値が無いとエラーになる", async () => {
+test("--css に値が無いとエラーになる", async () => {
   const { code, stderr } = await runCli(["a.md", "--css"]);
-  assertEquals(code, 1);
-  assertStringIncludes(stderr, "--css にパスを指定してください");
+  expect(code).toEqual(1);
+  expect(stderr).toContain("--css にパスを指定してください");
 });
 
-Deno.test("位置引数を省略すると stdin から読む", async () => {
+test("位置引数を省略すると stdin から読む", async () => {
   const { code, stdout } = await runCli([], SIMPLE_MARKDOWN);
-  assertEquals(code, 0);
-  assertStringIncludes(stdout, "<title>md2html</title>");
-  assertStringIncludes(stdout, "見出し");
-  assert(!stdout.includes('<pre class="mermaid"'));
+  expect(code).toEqual(0);
+  expect(stdout).toContain("<title>md2html</title>");
+  expect(stdout).toContain("見出し");
+  expect(!stdout.includes('<pre class="mermaid"')).toBe(true);
 });
 
-Deno.test('位置引数 "-" は stdin から読む', async () => {
+test('位置引数 "-" は stdin から読む', async () => {
   const { code, stdout } = await runCli(["-"], SIMPLE_MARKDOWN);
-  assertEquals(code, 0);
-  assertStringIncludes(stdout, "<title>md2html</title>");
+  expect(code).toEqual(0);
+  expect(stdout).toContain("<title>md2html</title>");
 });
 
-Deno.test("stdin 入力でも frontmatter の title を使う", async () => {
+test("stdin 入力でも frontmatter の title を使う", async () => {
   const markdown = `---
 title: fm-title
 ---
@@ -132,11 +117,11 @@ title: fm-title
 # 見出し
 `;
   const { code, stdout } = await runCli(["-"], markdown);
-  assertEquals(code, 0);
-  assertStringIncludes(stdout, "<title>fm-title</title>");
+  expect(code).toEqual(0);
+  expect(stdout).toContain("<title>fm-title</title>");
 });
 
-Deno.test("--title は frontmatter の title より優先される", async () => {
+test("--title は frontmatter の title より優先される", async () => {
   const markdown = `---
 title: fm-title
 ---
@@ -147,41 +132,23 @@ title: fm-title
     ["--title", "cli-title", "-"],
     markdown,
   );
-  assertEquals(code, 0);
-  assertStringIncludes(stdout, "<title>cli-title</title>");
+  expect(code).toEqual(0);
+  expect(stdout).toContain("<title>cli-title</title>");
 });
 
-Deno.test("空文字列の位置引数はエラーになる", async () => {
+test("空文字列の位置引数はエラーになる", async () => {
   const { code, stderr } = await runCli([""], SIMPLE_MARKDOWN);
-  assertEquals(code, 1);
-  assertStringIncludes(stderr, "入力ファイルのパスが空です");
+  expect(code).toEqual(1);
+  expect(stderr).toContain("入力ファイルのパスが空です");
 });
 
-Deno.test("短縮フラグの塊でも不明なオプションは 1 回だけ報告される", async () => {
+test("短縮フラグの塊でも不明なオプションは 1 回だけ報告される", async () => {
   const { code, stderr } = await runCli(["-xy", "a.md"]);
-  assertEquals(code, 1);
-  assertStringIncludes(stderr, "不明なオプション: -xy\n");
+  expect(code).toEqual(1);
+  expect(stderr).toContain("不明なオプション: -xy\n");
 });
 
-Deno.test("shebang の権限セットだけで変換できる", async () => {
-  const child = new Deno.Command("deno", {
-    args: ["run", ...(await shebangDenoFlags()), CLI_PATH, "-"],
-    cwd: REPO_ROOT,
-    stdin: "piped",
-    stdout: "piped",
-    stderr: "piped",
-  }).spawn();
-  const writer = child.stdin.getWriter();
-  await writer.write(new TextEncoder().encode(SIMPLE_MARKDOWN));
-  await writer.close();
-
-  const { code, stdout, stderr } = await child.output();
-  const decoder = new TextDecoder();
-  assertEquals(code, 0, decoder.decode(stderr));
-  assertStringIncludes(decoder.decode(stdout), "<title>md2html</title>");
-});
-
-Deno.test('--title "" は未指定扱いになる', async () => {
+test('--title "" は未指定扱いになる', async () => {
   const markdown = `---
 title: fm-title
 ---
@@ -189,17 +156,17 @@ title: fm-title
 # 見出し
 `;
   const { code, stdout } = await runCli(["--title", "", "-"], markdown);
-  assertEquals(code, 0);
-  assertStringIncludes(stdout, "<title>fm-title</title>");
+  expect(code).toEqual(0);
+  expect(stdout).toContain("<title>fm-title</title>");
 });
 
-Deno.test("lang の指定が無ければ html lang は ja になる", async () => {
+test("lang の指定が無ければ html lang は ja になる", async () => {
   const { code, stdout } = await runCli(["-"], SIMPLE_MARKDOWN);
-  assertEquals(code, 0);
-  assertStringIncludes(stdout, '<html lang="ja">');
+  expect(code).toEqual(0);
+  expect(stdout).toContain('<html lang="ja">');
 });
 
-Deno.test("stdin 入力でも frontmatter の lang が html lang に反映される", async () => {
+test("stdin 入力でも frontmatter の lang が html lang に反映される", async () => {
   const markdown = `---
 lang: en
 ---
@@ -207,11 +174,11 @@ lang: en
 # 見出し
 `;
   const { code, stdout } = await runCli(["-"], markdown);
-  assertEquals(code, 0);
-  assertStringIncludes(stdout, '<html lang="en">');
+  expect(code).toEqual(0);
+  expect(stdout).toContain('<html lang="en">');
 });
 
-Deno.test("--lang は frontmatter の lang より優先される", async () => {
+test("--lang は frontmatter の lang より優先される", async () => {
   const markdown = `---
 lang: en
 ---
@@ -219,11 +186,11 @@ lang: en
 # 見出し
 `;
   const { code, stdout } = await runCli(["--lang", "fr", "-"], markdown);
-  assertEquals(code, 0);
-  assertStringIncludes(stdout, '<html lang="fr">');
+  expect(code).toEqual(0);
+  expect(stdout).toContain('<html lang="fr">');
 });
 
-Deno.test('--lang "" は未指定扱いになる', async () => {
+test('--lang "" は未指定扱いになる', async () => {
   const markdown = `---
 lang: en
 ---
@@ -231,11 +198,11 @@ lang: en
 # 見出し
 `;
   const { code, stdout } = await runCli(["--lang", "", "-"], markdown);
-  assertEquals(code, 0);
-  assertStringIncludes(stdout, '<html lang="en">');
+  expect(code).toEqual(0);
+  expect(stdout).toContain('<html lang="en">');
 });
 
-Deno.test("frontmatter の md2html が不正なら stderr へ警告を出しつつ変換は続ける", async () => {
+test("frontmatter の md2html が不正なら stderr へ警告を出しつつ変換は続ける", async () => {
   const markdown = `---
 md2html: img
 ---
@@ -243,27 +210,25 @@ md2html: img
 # 見出し
 `;
   const { code, stdout, stderr } = await runCli(["-"], markdown);
-  assertEquals(code, 0);
-  assertStringIncludes(
-    stderr,
+  expect(code).toEqual(0);
+  expect(stderr).toContain(
     "md2html: frontmatter の md2html はマッピングでないため無視した",
   );
-  assertStringIncludes(stdout, "<h1");
+  expect(stdout).toContain("<h1");
 });
 
-Deno.test("--mermaid-version の形式が不正なら exit 1 で指定元を含むエラーになる", async () => {
+test("--mermaid-version の形式が不正なら exit 1 で指定元を含むエラーになる", async () => {
   const { code, stderr } = await runCli(
     ["--mermaid-version", "../x", "-"],
     SIMPLE_MARKDOWN,
   );
-  assertEquals(code, 1);
-  assertStringIncludes(
-    stderr,
+  expect(code).toEqual(1);
+  expect(stderr).toContain(
     'mermaid のバージョン指定 "../x" (--mermaid-version) の形式が不正です',
   );
 });
 
-Deno.test("frontmatter の md2html.mermaid.version の形式が不正なら exit 1 になる", async () => {
+test("frontmatter の md2html.mermaid.version の形式が不正なら exit 1 になる", async () => {
   const markdown = `---
 md2html:
   mermaid:
@@ -273,11 +238,11 @@ md2html:
 # 見出し
 `;
   const { code, stderr } = await runCli(["-"], markdown);
-  assertEquals(code, 1);
-  assertStringIncludes(stderr, "(frontmatter の md2html.mermaid.version)");
+  expect(code).toEqual(1);
+  expect(stderr).toContain("(frontmatter の md2html.mermaid.version)");
 });
 
-Deno.test("frontmatter の md2html.mermaid が不正なら stderr へ警告を出しつつ変換は続ける", async () => {
+test("frontmatter の md2html.mermaid が不正なら stderr へ警告を出しつつ変換は続ける", async () => {
   const markdown = `---
 md2html:
   mermaid: x
@@ -286,12 +251,11 @@ md2html:
 # 見出し
 `;
   const { code, stdout, stderr } = await runCli(["-"], markdown);
-  assertEquals(code, 0);
-  assertStringIncludes(
-    stderr,
+  expect(code).toEqual(0);
+  expect(stderr).toContain(
     "md2html: frontmatter の md2html.mermaid はマッピングでないため無視した",
   );
-  assertStringIncludes(stdout, "<h1");
+  expect(stdout).toContain("<h1");
 });
 
 /** main() を fake deps で直接呼ぶためのテスト用 CliDeps を作る。 */
@@ -316,34 +280,34 @@ function fakeDeps(overrides: Partial<CliDeps> = {}): {
   return { deps, out, err };
 }
 
-Deno.test("main(): --help は使い方を out に積んで 0 を返す", async () => {
+test("main(): --help は使い方を out に積んで 0 を返す", async () => {
   const { deps, out, err } = fakeDeps();
   const code = await main(["--help"], deps);
-  assertEquals(code, 0);
-  assertEquals(out.length, 1);
-  assertStringIncludes(out[0], "使い方: md2html");
-  assertEquals(err.length, 0);
+  expect(code).toEqual(0);
+  expect(out.length).toEqual(1);
+  expect(out[0]).toContain("使い方: md2html");
+  expect(err.length).toEqual(0);
 });
 
-Deno.test("main(): 読み込めない入力ファイルは err の先頭にエラーを積んで 1 を返す", async () => {
+test("main(): 読み込めない入力ファイルは err の先頭にエラーを積んで 1 を返す", async () => {
   const { deps, err } = fakeDeps({
     readTextFile: () => Promise.reject(new Error("ENOENT")),
   });
   const code = await main(["missing.md"], deps);
-  assertEquals(code, 1);
-  assertEquals(err[0], "md2html: 入力ファイルを読み込めない: ENOENT");
+  expect(code).toEqual(1);
+  expect(err[0]).toEqual("md2html: 入力ファイルを読み込めない: ENOENT");
 });
 
-Deno.test("main(): stdin 入力を変換して out に積む", async () => {
+test("main(): stdin 入力を変換して out に積む", async () => {
   const { deps, out } = fakeDeps({
     stdinIsTerminal: () => false,
     readStdin: () => Promise.resolve("# hello\n"),
   });
   const code = await main([], deps);
-  assertEquals(code, 0);
-  assertEquals(out.length, 1);
-  assertStringIncludes(out[0], "<title>md2html</title>");
-  assertStringIncludes(out[0], "<h1");
+  expect(code).toEqual(0);
+  expect(out.length).toEqual(1);
+  expect(out[0]).toContain("<title>md2html</title>");
+  expect(out[0]).toContain("<h1");
 });
 
 const MERMAID_MARKDOWN = "```mermaid\ngraph TD; A-->B;\n```\n";
@@ -366,14 +330,14 @@ function fakeDepsRecordingMermaidVersion(
   return { deps, out, err, versions };
 }
 
-Deno.test("main(): 既定では MERMAID_VERSION が getMermaidJs に渡る", async () => {
+test("main(): 既定では MERMAID_VERSION が getMermaidJs に渡る", async () => {
   const { deps, versions } = fakeDepsRecordingMermaidVersion(MERMAID_MARKDOWN);
   const code = await main([], deps);
-  assertEquals(code, 0);
-  assertEquals(versions, [MERMAID_VERSION]);
+  expect(code).toEqual(0);
+  expect(versions).toEqual([MERMAID_VERSION]);
 });
 
-Deno.test("main(): frontmatter の md2html.mermaid.version が getMermaidJs に渡る", async () => {
+test("main(): frontmatter の md2html.mermaid.version が getMermaidJs に渡る", async () => {
   const markdown = `---
 md2html:
   mermaid:
@@ -383,11 +347,11 @@ md2html:
 ${MERMAID_MARKDOWN}`;
   const { deps, versions } = fakeDepsRecordingMermaidVersion(markdown);
   const code = await main([], deps);
-  assertEquals(code, 0);
-  assertEquals(versions, ["11.0.0"]);
+  expect(code).toEqual(0);
+  expect(versions).toEqual(["11.0.0"]);
 });
 
-Deno.test("main(): --mermaid-version は frontmatter より優先される", async () => {
+test("main(): --mermaid-version は frontmatter より優先される", async () => {
   const markdown = `---
 md2html:
   mermaid:
@@ -397,11 +361,11 @@ md2html:
 ${MERMAID_MARKDOWN}`;
   const { deps, versions } = fakeDepsRecordingMermaidVersion(markdown);
   const code = await main(["--mermaid-version", "11.1.0"], deps);
-  assertEquals(code, 0);
-  assertEquals(versions, ["11.1.0"]);
+  expect(code).toEqual(0);
+  expect(versions).toEqual(["11.1.0"]);
 });
 
-Deno.test('main(): --mermaid-version "" は未指定扱い', async () => {
+test('main(): --mermaid-version "" は未指定扱い', async () => {
   const markdown = `---
 md2html:
   mermaid:
@@ -411,11 +375,11 @@ md2html:
 ${MERMAID_MARKDOWN}`;
   const { deps, versions } = fakeDepsRecordingMermaidVersion(markdown);
   const code = await main(["--mermaid-version", ""], deps);
-  assertEquals(code, 0);
-  assertEquals(versions, ["11.0.0"]);
+  expect(code).toEqual(0);
+  expect(versions).toEqual(["11.0.0"]);
 });
 
-Deno.test("main(): getMermaidJs が失敗すると版と指定元を含むエラーで 1 を返す", async () => {
+test("main(): getMermaidJs が失敗すると版と指定元を含むエラーで 1 を返す", async () => {
   const markdown = `---
 md2html:
   mermaid:
@@ -427,15 +391,15 @@ ${MERMAID_MARKDOWN}`;
     stdinIsTerminal: () => false,
     readStdin: () => Promise.resolve(markdown),
     getMermaidJs: () =>
-      Promise.reject(new Error("deno bundle に失敗した: boom")),
+      Promise.reject(new Error("mermaid の取得に失敗した: boom")),
   });
   const code = await main([], deps);
-  assertEquals(code, 1);
-  assert(
+  expect(code).toEqual(1);
+  expect(
     err.some((line) =>
       line.includes(
-        "mermaid 11.0.0 (frontmatter の md2html.mermaid.version) の取得に失敗した: deno bundle に失敗した: boom",
-      )
+        "mermaid 11.0.0 (frontmatter の md2html.mermaid.version) の取得に失敗した: mermaid の取得に失敗した: boom",
+      ),
     ),
-  );
+  ).toBe(true);
 });

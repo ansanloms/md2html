@@ -2,17 +2,21 @@
 // 副作用 (mermaid bundle の取得・キャッシュ、ローカル画像の読み込み) は
 // ConvertOptions 経由で呼び出し側から注入する。
 
-import { unified } from "unified";
-import remarkParse from "remark-parse";
-import remarkGfm from "remark-gfm";
-import remarkRehype from "remark-rehype";
-import rehypeRaw from "rehype-raw";
-import rehypeStringify from "rehype-stringify";
 import rehypeShiki from "@shikijs/rehype";
 import { rehypeGithubAlerts } from "rehype-github-alerts";
+import rehypeRaw from "rehype-raw";
+import rehypeStringify from "rehype-stringify";
+import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import remarkRehype from "remark-rehype";
+import { unified } from "unified";
 import { visit } from "unist-util-visit";
-import { encodeBase64 } from "@std/encoding/base64";
-import { CODE_COPY_JS, MARKDOWN_THEME_CSS, ZOOM_JS } from "./assets.ts";
+import {
+  CODE_COPY_JS,
+  MARKDOWN_THEME_CSS,
+  MERMAID_RENDER_JS,
+  ZOOM_JS,
+} from "./assets.ts";
 import type { Frontmatter } from "./frontmatter.ts";
 
 export interface ResolvedImage {
@@ -120,15 +124,14 @@ export interface ConvertOptions {
   labels?: Partial<Labels>;
   /** 追記するユーザ CSS (テキスト)。 */
   css?: string;
-  /** mermaid ブロックがあるときだけ呼ばれる。mermaid の browser 向け bundle 本文を返す。 */
+  /** mermaid ブロックがあるときだけ呼ばれる。mermaid.min.js (globalThis.mermaid を定義する classic script) の本文を返す。 */
   getMermaidJs: () => Promise<string>;
   /** http(s): / data: 以外の img src を解決する。読めなければ null を返す。 */
   resolveImage: (src: string) => Promise<ResolvedImage | null>;
 }
 
-// remark/rehype 系のパッケージは deno.json に "hast" 型を直接持ち込んでいないため、
+// remark/rehype 系のパッケージは package.json に "hast" 型を直接持ち込んでいないため、
 // hast ノードは最小限のダックタイピングで扱う (visit へは any として渡す)。
-// deno-lint-ignore no-explicit-any
 type HastNode = any;
 
 /**
@@ -189,8 +192,8 @@ function rehypeMermaid(used: { value: boolean }) {
         }
 
         const classNames: string[] = Array.isArray(
-            codeChild.properties?.className,
-          )
+          codeChild.properties?.className,
+        )
           ? codeChild.properties.className
           : [];
         if (!classNames.includes("language-mermaid")) {
@@ -222,9 +225,8 @@ function rehypeInlineImages(
   used: { value: boolean },
 ) {
   return async (tree: HastNode) => {
-    const targets: Array<
-      { node: HastNode; parent: HastNode; index: number }
-    > = [];
+    const targets: Array<{ node: HastNode; parent: HastNode; index: number }> =
+      [];
     visit(
       tree,
       "element",
@@ -236,7 +238,8 @@ function rehypeInlineImages(
         if (
           node.tagName === "img" &&
           typeof node.properties?.src === "string" &&
-          parent && typeof index === "number"
+          parent &&
+          typeof index === "number"
         ) {
           targets.push({ node, parent, index });
         }
@@ -252,16 +255,15 @@ function rehypeInlineImages(
 
       const resolved = await resolveImage(src);
       if (resolved) {
-        node.properties.src = `data:${resolved.mime};base64,${
-          encodeBase64(resolved.data)
-        }`;
+        node.properties.src = `data:${resolved.mime};base64,${Buffer.from(
+          resolved.data,
+        ).toString("base64")}`;
         used.value = true;
         continue;
       }
 
-      const alt = typeof node.properties.alt === "string"
-        ? node.properties.alt
-        : "";
+      const alt =
+        typeof node.properties.alt === "string" ? node.properties.alt : "";
       const label = formatLabel(
         labels.imagePlaceholder,
         alt !== "" ? alt : labels.image,
@@ -287,9 +289,7 @@ function rehypeTableWrap() {
         index: number | undefined,
         parent: HastNode | undefined,
       ) => {
-        if (
-          node.tagName !== "table" || !parent || typeof index !== "number"
-        ) {
+        if (node.tagName !== "table" || !parent || typeof index !== "number") {
           return;
         }
         parent.children[index] = {
@@ -334,7 +334,7 @@ function rehypeCodeBlocks(labels: Labels, used: { value: boolean }) {
 
         const classNames = getClassNames(codeChild.properties);
         const languageClass = classNames.find((name) =>
-          name.startsWith("language-")
+          name.startsWith("language-"),
         );
         // defaultLanguage: "text" の fallback と区別できないため、
         // 解決後の言語が "text" のときはラベルを出さない。
@@ -562,22 +562,25 @@ export async function convert(
   let mermaidScript = "";
   if (mermaidUsed.value) {
     const js = await options.getMermaidJs();
-    mermaidScript = `<script type="module">${escapeScriptClose(js)}</script>`;
+    mermaidScript = `<script>${escapeScriptClose(js)}</script><script>${escapeScriptClose(
+      MERMAID_RENDER_JS,
+    )}</script>`;
   }
 
   let layoutStyle = "";
   let tocAside = "";
   if (headings.length > 0) {
     const items = headings
-      .map((heading) =>
-        `<li><a class="lv-${heading.depth}" href="#${escapeHtml(heading.id)}">${
-          escapeHtml(heading.text)
-        }</a></li>`
+      .map(
+        (heading) =>
+          `<li><a class="lv-${heading.depth}" href="#${escapeHtml(heading.id)}">${escapeHtml(
+            heading.text,
+          )}</a></li>`,
       )
       .join("");
-    tocAside = `<aside class="toc" aria-label="${
-      escapeHtml(labels.toc)
-    }"><ul>${items}</ul></aside>`;
+    tocAside = `<aside class="toc" aria-label="${escapeHtml(
+      labels.toc,
+    )}"><ul>${items}</ul></aside>`;
   } else {
     layoutStyle = ' style="grid-template-columns: minmax(0, 1fr)"';
   }
@@ -594,7 +597,8 @@ export async function convert(
   // 対象セレクタは zoom.js が読む JSON ブロックとして zoom.js より前に置く。
   const explicitTargets = options.frontmatter?.md2html?.zoomTargets;
   const zoomTargets = explicitTargets ?? DEFAULT_ZOOM_TARGETS;
-  const zoomNeeded = mermaidUsed.value ||
+  const zoomNeeded =
+    mermaidUsed.value ||
     (zoomTargets.length > 0 &&
       (explicitTargets !== undefined || imageUsed.value));
   // zoom.js の文言。既定のままなら JSON へ載せない (zoom.js 側の既定が使われる)。
@@ -614,18 +618,18 @@ export async function convert(
       const payload = hasZoomLabels
         ? { targets: zoomTargets, labels: zoomLabels }
         : zoomTargets;
-      zoomTargetsJson =
-        `<script type="application/json" id="md2html-zoom-targets">${
-          escapeJsonForHtml(JSON.stringify(payload))
-        }</script>`;
+      zoomTargetsJson = `<script type="application/json" id="md2html-zoom-targets">${escapeJsonForHtml(
+        JSON.stringify(payload),
+      )}</script>`;
     }
     zoomScript = `<script>${escapeScriptClose(ZOOM_JS)}</script>`;
   }
 
   const description = options.frontmatter?.description ?? "";
-  const descriptionMeta = description === ""
-    ? ""
-    : `<meta name="description" content="${escapeHtml(description)}">`;
+  const descriptionMeta =
+    description === ""
+      ? ""
+      : `<meta name="description" content="${escapeHtml(description)}">`;
 
   const lang = options.lang ?? "ja";
 
@@ -643,9 +647,9 @@ export async function convert(
     "</style>",
     "</head>",
     "<body>",
-    `<header class="site-header"><div class="inner"><span class="brand">${
-      escapeHtml(options.title)
-    }</span></div></header>`,
+    `<header class="site-header"><div class="inner"><span class="brand">${escapeHtml(
+      options.title,
+    )}</span></div></header>`,
     `<div class="layout"${layoutStyle}>`,
     `<article class="md">${body}</article>`,
     tocAside,
@@ -656,5 +660,7 @@ export async function convert(
     mermaidScript,
     "</body>",
     "</html>",
-  ].filter((part) => part !== "").join("\n");
+  ]
+    .filter((part) => part !== "")
+    .join("\n");
 }

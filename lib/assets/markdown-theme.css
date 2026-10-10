@@ -23,10 +23,12 @@
   --alert-important: #8250df;
   --alert-warning: #9a6700;
   --alert-caution: #cf222e;
-  --font-body: "Helvetica Neue", "Segoe UI", "Hiragino Kaku Gothic ProN",
-               "Hiragino Sans", Meiryo, system-ui, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono",
-               "Roboto Mono", Menlo, Consolas, "Noto Sans Mono CJK JP", monospace;
+  --font-body:
+    "Helvetica Neue", "Segoe UI", "Hiragino Kaku Gothic ProN", "Hiragino Sans",
+    Meiryo, system-ui, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Roboto Mono",
+    Menlo, Consolas, "Noto Sans Mono CJK JP", monospace;
   color-scheme: light dark;
   --page-max: 1440px;
 }
@@ -73,16 +75,22 @@ body {
 a {
   color: var(--accent);
   text-decoration: none;
-  -webkit-tap-highlight-color: color-mix(in srgb, var(--accent) 28%,
-    transparent);
+  -webkit-tap-highlight-color: color-mix(
+    in srgb,
+    var(--accent) 28%,
+    transparent
+  );
 }
 a:hover {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 button {
-  -webkit-tap-highlight-color: color-mix(in srgb, var(--accent) 28%,
-    transparent);
+  -webkit-tap-highlight-color: color-mix(
+    in srgb,
+    var(--accent) 28%,
+    transparent
+  );
 }
 /* readable, themed text selection + shared text-fragment landing
    (ics.media/entry/260521) */
@@ -119,7 +127,7 @@ button {
 .site-header .brand {
   font-weight: 600;
   font-size: 15px;
-  letter-spacing: .01em;
+  letter-spacing: 0.01em;
   color: var(--fg);
 }
 
@@ -164,7 +172,9 @@ button {
   border-left: 2px solid transparent;
   margin-left: -18px;
   padding-left: 16px;
-  transition: color .12s, border-color .12s;
+  transition:
+    color 0.12s,
+    border-color 0.12s;
 }
 .toc a:hover {
   color: var(--fg);
@@ -223,41 +233,41 @@ button {
   line-height: 1.25;
   font-weight: 650;
   scroll-margin-top: 84px;
-  letter-spacing: -.01em;
+  letter-spacing: -0.01em;
 }
 .md h1 {
   font-size: 2.05rem;
-  margin: 0 0 .5em;
-  letter-spacing: -.02em;
+  margin: 0 0 0.5em;
+  letter-spacing: -0.02em;
 }
 .md h2 {
   font-size: 1.5rem;
-  margin: 2.2em 0 .7em;
-  padding-bottom: .3em;
+  margin: 2.2em 0 0.7em;
+  padding-bottom: 0.3em;
   border-bottom: 1px solid var(--border-subtle);
 }
 .md h3 {
   font-size: 1.2rem;
-  margin: 1.8em 0 .6em;
+  margin: 1.8em 0 0.6em;
 }
 .md h4 {
   font-size: 1.02rem;
-  margin: 1.5em 0 .5em;
+  margin: 1.5em 0 0.5em;
 }
 .md h5 {
-  font-size: .95rem;
-  margin: 1.4em 0 .4em;
+  font-size: 0.95rem;
+  margin: 1.4em 0 0.4em;
   color: var(--fg-muted);
 }
 .md h6 {
-  font-size: .88rem;
-  margin: 1.4em 0 .4em;
+  font-size: 0.88rem;
+  margin: 1.4em 0 0.4em;
   color: var(--fg-faint);
 }
 
 .md .anchor {
   opacity: 0;
-  margin-left: .3em;
+  margin-left: 0.3em;
   font-weight: 400;
   color: var(--fg-faint);
   text-decoration: none;
@@ -300,11 +310,11 @@ button {
   padding-left: 1.5em;
 }
 .md li {
-  margin: .3em 0;
+  margin: 0.3em 0;
 }
 .md li > ul,
 .md li > ol {
-  margin: .3em 0;
+  margin: 0.3em 0;
 }
 .md li::marker {
   color: var(--fg-faint);
@@ -312,21 +322,21 @@ button {
 
 .md ul.contains-task-list {
   list-style: none;
-  padding-left: .2em;
+  padding-left: 0.2em;
 }
 .md .task-list-item {
   display: flex;
   align-items: flex-start;
-  gap: .55em;
+  gap: 0.55em;
 }
 .md .task-list-item input {
-  margin-top: .35em;
+  margin-top: 0.35em;
   accent-color: var(--accent);
 }
 
 .md blockquote {
   margin: 1.4em 0;
-  padding: .2em 1.1em;
+  padding: 0.2em 1.1em;
   border-left: 3px solid var(--quote-bar);
   color: var(--fg-muted);
 }
@@ -337,7 +347,7 @@ button {
 /* GitHub-style alerts (rehype-github-alerts) */
 .md .markdown-alert {
   margin: 1.4em 0;
-  padding: .2em 1.1em;
+  padding: 0.2em 1.1em;
   border-left: 3px solid var(--alert-accent, var(--quote-bar));
 }
 .md .markdown-alert > :last-child {
@@ -351,8 +361,8 @@ button {
 .md .markdown-alert .markdown-alert-title {
   display: flex;
   align-items: center;
-  gap: .5em;
-  margin: 0 0 .35em;
+  gap: 0.5em;
+  margin: 0 0 0.35em;
   font-weight: 600;
   color: var(--alert-accent);
 }
@@ -378,18 +388,18 @@ button {
 .md mark {
   background: var(--mark);
   color: inherit;
-  padding: 0 .15em;
+  padding: 0 0.15em;
   border-radius: 2px;
 }
 
 /* inline code */
 .md :not(pre) > code {
   font-family: var(--font-mono);
-  font-size: .875em;
+  font-size: 0.875em;
   background: var(--bg-code);
   border: 1px solid var(--border-subtle);
   border-radius: 5px;
-  padding: .12em .38em;
+  padding: 0.12em 0.38em;
 }
 
 /* images / figures */
@@ -419,13 +429,13 @@ button {
 .md table {
   border-collapse: collapse;
   width: 100%;
-  font-size: .92rem;
+  font-size: 0.92rem;
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
 }
 .md th,
 .md td {
-  padding: .55em .85em;
+  padding: 0.55em 0.85em;
   border-bottom: 1px solid var(--border-subtle);
   text-align: left;
 }
@@ -457,7 +467,7 @@ button {
   right: 0;
   font-family: var(--font-mono);
   font-size: 11px;
-  letter-spacing: .04em;
+  letter-spacing: 0.04em;
   color: var(--fg-faint);
   text-transform: uppercase;
   padding: 7px 12px;
@@ -478,7 +488,10 @@ button {
   padding: 4px 9px;
   cursor: pointer;
   opacity: 0;
-  transition: opacity .12s, color .12s, border-color .12s;
+  transition:
+    opacity 0.12s,
+    color 0.12s,
+    border-color 0.12s;
 }
 .md .code-block:hover .code-copy {
   opacity: 1;
@@ -536,7 +549,7 @@ button {
   background: var(--bg-subtle);
   cursor: zoom-in;
   overflow: hidden;
-  transition: border-color .14s;
+  transition: border-color 0.14s;
 }
 .md .mermaid-fig:hover {
   border-color: var(--border);
@@ -579,7 +592,7 @@ button {
   padding: 4px 8px;
   pointer-events: none;
   opacity: 0;
-  transition: opacity .14s;
+  transition: opacity 0.14s;
 }
 .md .mermaid-fig:hover .fig-expand,
 .md .mermaid-fig:focus-visible .fig-expand,
@@ -617,9 +630,9 @@ dialog.zoom-dialog::backdrop {
   border-radius: 12px;
   background:
     radial-gradient(circle at 1px 1px, var(--border-subtle) 1px, transparent 0)
-    0 0 / 22px 22px,
+      0 0 / 22px 22px,
     var(--bg);
-  box-shadow: 0 18px 48px rgba(0,0,0,.34);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
   overflow: hidden;
   touch-action: none;
   user-select: none;
@@ -663,8 +676,11 @@ dialog.zoom-dialog::backdrop {
   border: 1px solid var(--border);
   border-radius: 7px;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(0,0,0,.12);
-  transition: color .12s, border-color .12s, background .12s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  transition:
+    color 0.12s,
+    border-color 0.12s,
+    background 0.12s;
 }
 .zoom-dialog .mz-btn:hover {
   color: var(--fg);

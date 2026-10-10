@@ -1,5 +1,3 @@
-#!/usr/bin/env -S deno run --quiet --allow-read --allow-write --allow-run=deno --allow-env=HOME,XDG_CACHE_HOME,VSCODE_TEXTMATE_DEBUG
-
 // markdown ファイルを自己完結 HTML (シンタックスハイライト + mermaid 内蔵) へ変換する CLI。
 //
 // 使い方は USAGE 定数を参照 (--help でも表示する)。
@@ -9,39 +7,37 @@
 // 対象へ反映する (未指定なら既定で画像が対象)。frontmatter ブロックは本文から除く。
 // md2html 名前空間の指定が不正なら警告を stderr へ出したうえで無視する。
 //
-// mermaid は npm:mermaid を import する browser 向けエントリ TS を子プロセスの
-// `deno bundle` でバンドルし、初回のみ ~/.cache/md2html/ (または
-// $XDG_CACHE_HOME/md2html/) へキャッシュする。以降はキャッシュを読むだけなので
-// このプロセス自身はネットワーク権限を必要としない (npm:mermaid の取得は
-// 子プロセスの deno bundle が自身のモジュール解決として行う)。
+// mermaid は jsdelivr の mermaid.min.js (IIFE) を初回のみ取得し、
+// ~/.cache/md2html/ (または $XDG_CACHE_HOME/md2html/) へキャッシュする。
+// 以降はキャッシュを読むだけでネットワークを必要としない。
 //
 // ローカル画像は入力ファイルのディレクトリを基準に解決し (lib/image.ts)、見つからなければ
 // cwd 基準へフォールバックする。
 //
 // 変換ロジックは lib/convert.ts の convert() に分離し、副作用 (ファイル読み書き・
-// mermaid bundle 取得・キャッシュ) はここで組み立てて注入する。
+// mermaid 取得・キャッシュ) はここで組み立てて注入する。
 //
 // ライブラリとして import する場合は mod.ts を使う。
 
-import { parseArgs } from "@std/cli/parse-args";
-import { basename, dirname } from "@std/path";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { basename, dirname } from "node:path";
+import { parseArgs } from "node:util";
 import { convert } from "./lib/convert.ts";
-import { createImageResolver } from "./lib/image.ts";
 import { type Frontmatter, parseFrontmatter } from "./lib/frontmatter.ts";
+import { createImageResolver } from "./lib/image.ts";
 import {
   getMermaidBundle,
   isValidMermaidVersion,
   MERMAID_VERSION,
-  type MermaidBundleDeps,
+  type MermaidFetchDeps,
 } from "./lib/mermaid.ts";
-import denoJson from "./deno.json" with { type: "json" };
+import pkg from "./package.json";
 
 /**
  * --help および引数エラー時に出す使い方。
  * ファイル冒頭コメント・README・エラー出力で文面を分散させないため、ここに一本化する。
  */
-const USAGE =
-  `使い方: md2html [<input.md>] [--output <path>] [--css <path>] [--title <title>] [--lang <lang>] [--mermaid-version <version>]
+const USAGE = `使い方: md2html [<input.md>] [--output <path>] [--css <path>] [--title <title>] [--lang <lang>] [--mermaid-version <version>]
   <input.md>  入力 markdown ファイル。省略するか "-" を指定すると stdin から読む。
   --output    出力先パス。省略時は stdout。
   --css       追記するユーザ CSS ファイルのパス。
@@ -54,49 +50,16 @@ const USAGE =
   --help      この使い方を表示する。
   --version   バージョンを表示する。`;
 
-/**
- * entryPath を browser 向けに bundle し outPath へ書き出す。失敗時は throw する。
- *
- * `--no-config` / `--no-lock` で md2html 実行時の cwd 以下にある無関係な
- * deno.json / deno.lock の自動検出を止める。付けないと、cwd に deno プロジェクトが
- * あるディレクトリ (例: 別リポジトリの README.md を変換する) で mermaid ブロックを
- * 変換するたびに、そのプロジェクトの deno.lock へ mermaid の依存木が書き込まれてしまう。
- */
-async function bundle(entryPath: string, outPath: string): Promise<void> {
-  const { success, stderr } = await new Deno.Command("deno", {
-    args: [
-      "bundle",
-      "--no-config",
-      "--no-lock",
-      "--platform",
-      "browser",
-      "--minify",
-      "-o",
-      outPath,
-      entryPath,
-    ],
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-
-  if (!success) {
-    throw new Error(
-      `deno bundle に失敗した: ${new TextDecoder().decode(stderr).trim()}`,
-    );
-  }
-}
-
-const mermaidBundleDeps: MermaidBundleDeps = {
-  env: (key) => Deno.env.get(key),
-  readTextFile: (path) => Deno.readTextFile(path),
-  writeTextFile: (path, text) => Deno.writeTextFile(path, text),
-  mkdir: (path) => Deno.mkdir(path, { recursive: true }),
-  makeTempDir: () => Deno.makeTempDir(),
-  remove: (path, options) => Deno.remove(path, options),
-  rename: (from, to) => Deno.rename(from, to),
-  readDir: (path) => Deno.readDir(path),
-  denoVersion: Deno.version.deno,
-  bundle,
+const mermaidFetchDeps: MermaidFetchDeps = {
+  env: (key) => process.env[key],
+  readTextFile: (path) => readFile(path, "utf8"),
+  writeTextFile: (path, text) => writeFile(path, text),
+  mkdir: async (path) => {
+    await mkdir(path, { recursive: true });
+  },
+  rename: (from, to) => rename(from, to),
+  remove: (path) => rm(path, { recursive: true, force: true }),
+  fetch: (url, init) => globalThis.fetch(url, init),
 };
 
 /** CLI の副作用をまとめた依存。テストでは差し替える。 */
@@ -108,7 +71,7 @@ export interface CliDeps {
   readTextFile: (path: string) => Promise<string>;
   readFile: (path: string) => Promise<Uint8Array>;
   writeTextFile: (path: string, text: string) => Promise<void>;
-  /** 指定した npm バージョンの mermaid の browser 向け bundle (JS ソース) を返す。 */
+  /** 指定した npm バージョンの mermaid.min.js (globalThis.mermaid を定義する classic script) の本文を返す。 */
   getMermaidJs: (version: string) => Promise<string>;
   /** stdout へ 1 行書く (console.log 相当)。 */
   log: (text: string) => void;
@@ -116,16 +79,20 @@ export interface CliDeps {
   error: (text: string) => void;
 }
 
-/** Deno API をそのまま使う CliDeps の実装。 */
-export const denoDeps: CliDeps = {
-  stdinIsTerminal: () => Deno.stdin.isTerminal(),
-  readStdin: () => new Response(Deno.stdin.readable).text(),
-  readTextFile: (path) => Deno.readTextFile(path),
-  readFile: (path) => Deno.readFile(path),
-  writeTextFile: (path, text) => Deno.writeTextFile(path, text),
-  getMermaidJs: (version) => getMermaidBundle(mermaidBundleDeps, version),
-  log: (text) => console.log(text),
-  error: (text) => console.error(text),
+/** Bun / Node API をそのまま使う CliDeps の実装。 */
+export const bunDeps: CliDeps = {
+  stdinIsTerminal: () => Boolean(process.stdin.isTTY),
+  readStdin: () => Bun.stdin.text(),
+  readTextFile: (path) => readFile(path, "utf8"),
+  readFile: (path) => readFile(path),
+  writeTextFile: (path, text) => writeFile(path, text),
+  getMermaidJs: (version) => getMermaidBundle(mermaidFetchDeps, version),
+  log: (text) => {
+    process.stdout.write(text + "\n");
+  },
+  error: (text) => {
+    process.stderr.write(text + "\n");
+  },
 };
 
 /** エラーメッセージ本文を取り出す。 */
@@ -140,66 +107,146 @@ function usageError(deps: CliDeps, message: string): number {
   return 1;
 }
 
+/** parseArgs へ渡すオプション定義。値付き・真偽値の一覧はここから導出する。 */
+const PARSE_OPTIONS = {
+  output: { type: "string" },
+  css: { type: "string" },
+  title: { type: "string" },
+  lang: { type: "string" },
+  "mermaid-version": { type: "string" },
+  help: { type: "boolean" },
+  version: { type: "boolean" },
+} as const;
+
+type OptionName = keyof typeof PARSE_OPTIONS;
+
+const optionNames = Object.keys(PARSE_OPTIONS) as OptionName[];
+/** CLI が受け付ける値付きオプション。 */
+const STRING_OPTIONS: string[] = optionNames.filter(
+  (name) => PARSE_OPTIONS[name].type === "string",
+);
+/** CLI が受け付ける真偽値オプション。 */
+const BOOLEAN_OPTIONS: string[] = optionNames.filter(
+  (name) => PARSE_OPTIONS[name].type === "boolean",
+);
+
+/**
+ * parseArgs (strict) へ渡す前に引数を走査し、不明なオプションを拾う。
+ * parseArgs は不明なオプションを 1 つずつ throw するため、`-xy` のような短縮フラグの塊を
+ * 塊のまま 1 回報告できるよう、ここで先に判定する。`--` 以降と "-" 単独は対象外。
+ * 値付きオプションの直後に値が無い場合は空文字列を補い、parseArgs が throw せず
+ * 後段の空値判定 (--output / --css はエラー、他は未指定扱い) に乗るようにする。
+ */
+function scanArgs(args: string[]): {
+  unknownOptions: string[];
+  help: boolean;
+  version: boolean;
+  args: string[];
+} {
+  const unknownOptions = new Set<string>();
+  const normalized: string[] = [];
+  let help = false;
+  let version = false;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--") {
+      normalized.push(...args.slice(i));
+      break;
+    }
+    normalized.push(arg);
+    if (!arg.startsWith("-") || arg === "-") {
+      continue;
+    }
+
+    const eq = arg.indexOf("=");
+    const name = arg.startsWith("--")
+      ? arg.slice(2, eq === -1 ? undefined : eq)
+      : undefined;
+    if (name !== undefined && STRING_OPTIONS.includes(name)) {
+      if (eq === -1) {
+        const next = args[i + 1];
+        if (next === undefined || (next.startsWith("-") && next !== "-")) {
+          normalized.push("");
+        } else {
+          normalized.push(next);
+          i++;
+        }
+      }
+    } else if (
+      name !== undefined &&
+      eq === -1 &&
+      BOOLEAN_OPTIONS.includes(name)
+    ) {
+      help ||= name === "help";
+      version ||= name === "version";
+    } else {
+      unknownOptions.add(arg);
+    }
+  }
+
+  return {
+    unknownOptions: [...unknownOptions],
+    help,
+    version,
+    args: normalized,
+  };
+}
+
 export async function main(
   args: string[],
-  deps: CliDeps = denoDeps,
+  deps: CliDeps = bunDeps,
 ): Promise<number> {
-  // parseArgs は未知のフラグも黙って受け入れるため、unknown で拾って後段で弾く。
-  // 位置引数 (key 無し) と stdin を表す "-" は正当なので対象外にする。
-  // 短縮フラグの塊 (`-xy`) では同じ arg で文字数分呼ばれるため Set で重複を潰す。
-  const unknownOptions = new Set<string>();
-  const parsed = parseArgs(args, {
-    string: ["output", "css", "title", "lang", "mermaid-version"],
-    boolean: ["help", "version"],
-    unknown: (arg) => {
-      if (arg.startsWith("-") && arg !== "-") {
-        unknownOptions.add(arg);
-      }
-      return true;
-    },
-  });
+  const scanned = scanArgs(args);
 
-  if (parsed.help) {
+  if (scanned.help) {
     deps.log(USAGE);
     return 0;
   }
 
-  if (parsed.version) {
-    deps.log(denoJson.version);
+  if (scanned.version) {
+    deps.log(pkg.version);
     return 0;
   }
 
-  if (unknownOptions.size > 0) {
+  if (scanned.unknownOptions.length > 0) {
     return usageError(
       deps,
-      `不明なオプション: ${[...unknownOptions].join(", ")}`,
+      `不明なオプション: ${scanned.unknownOptions.join(", ")}`,
     );
   }
 
-  // 値を伴わない --output / --css は parseArgs が空文字列を返す。
+  let parsed: ReturnType<
+    typeof parseArgs<{
+      args: string[];
+      options: typeof PARSE_OPTIONS;
+      strict: true;
+      allowPositionals: true;
+    }>
+  >;
+  try {
+    parsed = parseArgs({
+      args: scanned.args,
+      options: PARSE_OPTIONS,
+      strict: true,
+      allowPositionals: true,
+    });
+  } catch (error) {
+    return usageError(deps, messageOf(error));
+  }
+  const values = parsed.values;
+
+  // 値を伴わない --output / --css は空文字列になる (scanArgs が補う)。
   // 空文字列のパスは書き込み・読み込みのどちらでも意味を持たないためエラーにする。
-  if (parsed.output === "") {
+  if (values.output === "") {
     return usageError(deps, "--output にパスを指定してください");
   }
-  if (parsed.css === "") {
+  if (values.css === "") {
     return usageError(deps, "--css にパスを指定してください");
   }
 
-  // parseArgs は空文字列の引数を、オプションの値として消費した場合でも "_" へ積む
-  // (`--title ""` は title に "" を入れつつ "_" にも "" を積む)。この漏れ出しぶんだけを
-  // 1 つ取り除き、残った空文字列は本物の位置引数 (シェル変数が空だった等) として弾く。
-  // 空値でエラーにする --output / --css は上で弾いているため、ここでは
-  // 空値を未指定扱いにするオプション (--title / --lang / --mermaid-version) のぶんだけ数える。
-  const positional = parsed._.map(String);
-  for (const value of [parsed.title, parsed.lang, parsed["mermaid-version"]]) {
-    if (value !== "") {
-      continue;
-    }
-    const leaked = positional.indexOf("");
-    if (leaked !== -1) {
-      positional.splice(leaked, 1);
-    }
-  }
+  // 空文字列の位置引数 (シェル変数が空だった等) は弾く。
+  const positional = parsed.positionals;
   if (positional.includes("")) {
     return usageError(deps, "入力ファイルのパスが空です");
   }
@@ -223,21 +270,19 @@ export async function main(
       : await deps.readTextFile(inputPath);
   } catch (error) {
     deps.error(
-      `md2html: ${fromStdin ? "stdin" : "入力ファイル"}を読み込めない: ${
-        messageOf(error)
-      }`,
+      `md2html: ${fromStdin ? "stdin" : "入力ファイル"}を読み込めない: ${messageOf(
+        error,
+      )}`,
     );
     return 1;
   }
 
   let css: string | undefined;
-  if (parsed.css !== undefined) {
+  if (values.css !== undefined) {
     try {
-      css = await deps.readTextFile(parsed.css);
+      css = await deps.readTextFile(values.css);
     } catch (error) {
-      deps.error(
-        `md2html: CSS ファイルを読み込めない: ${messageOf(error)}`,
-      );
+      deps.error(`md2html: CSS ファイルを読み込めない: ${messageOf(error)}`);
       return 1;
     }
   }
@@ -258,24 +303,28 @@ export async function main(
 
   // frontmatter の title は空文字列を未指定扱いにしている (lib/frontmatter.ts)。
   // --title "" もそれに揃え、<title></title> にならないようにする。
-  const cliTitle = parsed.title === undefined || parsed.title === ""
-    ? undefined
-    : parsed.title;
-  const title = cliTitle ?? frontmatter.title ??
+  const cliTitle =
+    values.title === undefined || values.title === ""
+      ? undefined
+      : values.title;
+  const title =
+    cliTitle ??
+    frontmatter.title ??
     (fromStdin ? "md2html" : basename(inputPath));
   // 空の --lang も同様に未指定として扱う。
-  const lang = (parsed.lang || undefined) ?? frontmatter.lang;
+  const lang = (values.lang || undefined) ?? frontmatter.lang;
 
   // mermaid のバージョンも CLI > frontmatter > 既定。空の --mermaid-version は未指定扱い。
-  const cliMermaidVersion = parsed["mermaid-version"] || undefined;
+  const cliMermaidVersion = values["mermaid-version"] || undefined;
   const frontmatterMermaidVersion = frontmatter.md2html?.mermaid?.version;
-  const mermaidVersion = cliMermaidVersion ?? frontmatterMermaidVersion ??
-    MERMAID_VERSION;
-  const mermaidVersionSource = cliMermaidVersion !== undefined
-    ? "--mermaid-version"
-    : frontmatterMermaidVersion !== undefined
-    ? "frontmatter の md2html.mermaid.version"
-    : "既定";
+  const mermaidVersion =
+    cliMermaidVersion ?? frontmatterMermaidVersion ?? MERMAID_VERSION;
+  const mermaidVersionSource =
+    cliMermaidVersion !== undefined
+      ? "--mermaid-version"
+      : frontmatterMermaidVersion !== undefined
+        ? "frontmatter の md2html.mermaid.version"
+        : "既定";
   // 指定子はキャッシュのファイル名と bundle エントリに埋め込むため、mermaid ブロックの有無に
   // 関わらずここで形式を検査し、指定元を添えて弾く。
   if (!isValidMermaidVersion(mermaidVersion)) {
@@ -297,9 +346,9 @@ export async function main(
           return await deps.getMermaidJs(mermaidVersion);
         } catch (error) {
           throw new Error(
-            `mermaid ${mermaidVersion} (${mermaidVersionSource}) の取得に失敗した: ${
-              messageOf(error)
-            }`,
+            `mermaid ${mermaidVersion} (${mermaidVersionSource}) の取得に失敗した: ${messageOf(
+              error,
+            )}`,
           );
         }
       },
@@ -313,13 +362,11 @@ export async function main(
     return 1;
   }
 
-  if (parsed.output !== undefined) {
+  if (values.output !== undefined) {
     try {
-      await deps.writeTextFile(parsed.output, html);
+      await deps.writeTextFile(values.output, html);
     } catch (error) {
-      deps.error(
-        `md2html: 出力ファイルを書き込めない: ${messageOf(error)}`,
-      );
+      deps.error(`md2html: 出力ファイルを書き込めない: ${messageOf(error)}`);
       return 1;
     }
   } else {
@@ -330,5 +377,6 @@ export async function main(
 }
 
 if (import.meta.main) {
-  Deno.exit(await main(Deno.args, denoDeps));
+  // process.exit だと stdout がパイプのとき書き込み途中で終了し出力が切れるため、自然終了させる。
+  process.exitCode = await main(process.argv.slice(2), bunDeps);
 }
