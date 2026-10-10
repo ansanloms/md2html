@@ -107,3 +107,9 @@ chmod +x md2html-<target>
 
 GitHub Release にバージョンタグ（例: `0.1.0`、`v` プレフィックス無し）を切り、`bun build --compile --target=<target>` で生成した OS・アーキテクチャ別のバイナリを添付する。
 ターゲットは `bun-linux-x64` / `bun-linux-arm64` / `bun-darwin-x64` / `bun-darwin-arm64` / `bun-windows-x64` の 5 つで、asset 名は `md2html-<target>`。Windows 向けは `.exe` が付いて `md2html-bun-windows-x64.exe` として添付される。
+
+パッケージング向けの注意:
+
+1. Release には `SHA256SUMS`（各バイナリの sha256、`sha256sum` 形式）も添付される。
+2. 各バイナリは Bun の standalone 実行ファイルで、ファイル末尾の trailer に埋め込みペイロードの位置を持つ。`patchelf` や `strip` で ELF を書き換えると壊れるので、そのまま配置する。
+3. Linux 向けは glibc 動的リンク（musl ではない）で、システムのローダ（`/lib64/ld-linux-x86-64.so.2` 等）を前提にする。

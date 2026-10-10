@@ -30,9 +30,11 @@ jobs:
           for t in bun-linux-x64 bun-linux-arm64 bun-darwin-x64 bun-darwin-arm64 bun-windows-x64; do
             bun build --compile --target="$t" ./cli.ts --outfile "dist/md2html-$t"
           done
+          # パッケージング側 (nix 等) がバイナリを落とさずに hash を取れるよう、チェックサムを添付する。
+          (cd dist && sha256sum md2html-* > SHA256SUMS)
 
       - name: 成果物を確認する
-        run: ls -la dist/
+        run: ls -la dist/ && cat dist/SHA256SUMS
 
       # asset 名はファイル名 (md2html-<target>) がそのまま使われる。
       # 同じタグのリリースが既にある場合は asset の差し替えのみ行う。
@@ -42,9 +44,9 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           if gh release view "${TAG}" > /dev/null 2>&1; then
-            gh release upload "${TAG}" dist/md2html-* --clobber
+            gh release upload "${TAG}" dist/md2html-* dist/SHA256SUMS --clobber
           else
-            gh release create "${TAG}" dist/md2html-* \
+            gh release create "${TAG}" dist/md2html-* dist/SHA256SUMS \
               --verify-tag \
               --title "${TAG}" \
               --generate-notes
