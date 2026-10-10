@@ -132,7 +132,6 @@ export interface ConvertOptions {
 
 // remark/rehype 系のパッケージは package.json に "hast" 型を直接持ち込んでいないため、
 // hast ノードは最小限のダックタイピングで扱う (visit へは any として渡す)。
-// biome-ignore lint/suspicious/noExplicitAny: hast ノードはダックタイピングで扱う
 type HastNode = any;
 
 /**

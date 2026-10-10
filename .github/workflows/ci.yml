@@ -26,7 +26,7 @@ jobs:
       - name: install
         run: bun install --frozen-lockfile
 
-      - name: lint (biome check)
+      - name: lint (oxlint + oxfmt --check)
         run: bun run lint
 
       - name: type check

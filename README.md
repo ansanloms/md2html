@@ -92,7 +92,7 @@ const html = await convert(body, {
 
 - `bun run build` - `bun build --compile` で `cli.ts` を単一バイナリ `dist/md2html` にする（実行に Bun / Deno は不要）。
 - `bun run test` - ユニットテスト（`lib/*.test.ts` と `cli.test.ts`）を実行する。
-- `bun run lint` - Biome (`biome check .`)。
+- `bun run lint` - oxlint (`oxlint --deny-warnings`) と oxfmt (`oxfmt --check`)。
 - `bun run check` - 型検査 (`tsc --noEmit`)。
 
 ## インストール

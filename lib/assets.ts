@@ -4,12 +4,8 @@
 // (副作用の DI 分離という既存方針は、副作用を持つ処理のみを対象とする)。
 
 import codeCopyJsRaw from "./assets/code-copy.js" with { type: "text" };
-import markdownThemeCssRaw from "./assets/markdown-theme.css" with {
-  type: "text",
-};
-import mermaidRenderJsRaw from "./assets/mermaid-render.js" with {
-  type: "text",
-};
+import markdownThemeCssRaw from "./assets/markdown-theme.css" with { type: "text" };
+import mermaidRenderJsRaw from "./assets/mermaid-render.js" with { type: "text" };
 import zoomJsRaw from "./assets/zoom.js" with { type: "text" };
 
 /** デザイナ提供の自己完結テーマ CSS (light/dark は prefers-color-scheme を直接参照)。 */
