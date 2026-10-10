@@ -16,18 +16,25 @@ jobs:
       - name: checkout
         uses: actions/checkout@v7
 
-      - name: setup deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: "2.x"
+      - name: setup bun
+        uses: oven-sh/setup-bun@v2
 
+      - name: install
+        run: bun install --frozen-lockfile
+
+      # クロスコンパイルは Bun がサポートしている。
+      # Windows 向けは Bun が出力名に .exe を自動で付与する。
       - name: build
-        run: deno task build
+        run: |
+          set -eu
+          for t in bun-linux-x64 bun-linux-arm64 bun-darwin-x64 bun-darwin-arm64 bun-windows-x64; do
+            bun build --compile --target="$t" ./cli.ts --outfile "dist/md2html-$t"
+          done
 
       - name: 成果物を確認する
-        run: ls -la dist/md2html
+        run: ls -la dist/
 
-      # asset 名はファイル名 (md2html) がそのまま使われる。
+      # asset 名はファイル名 (md2html-<target>) がそのまま使われる。
       # 同じタグのリリースが既にある場合は asset の差し替えのみ行う。
       - name: GitHub Release へ添付する
         env:
@@ -35,9 +42,9 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           if gh release view "${TAG}" > /dev/null 2>&1; then
-            gh release upload "${TAG}" dist/md2html --clobber
+            gh release upload "${TAG}" dist/md2html-* --clobber
           else
-            gh release create "${TAG}" dist/md2html \
+            gh release create "${TAG}" dist/md2html-* \
               --verify-tag \
               --title "${TAG}" \
               --generate-notes

@@ -1,8 +1,8 @@
 // ローカル画像 (http(s): / data: 以外の img src) の解決ロジック。
 // ファイル読み込みは呼び出し側から readFile として注入するので、このモジュールは
-// Deno API に依存しない。
+// Deno / Bun 固有 API に依存しない。
 
-import { isAbsolute, join } from "@std/path";
+import { isAbsolute, join } from "node:path";
 import type { ResolvedImage } from "./convert.ts";
 
 const IMAGE_MIME_TYPES: Record<string, string> = {
@@ -88,17 +88,12 @@ export function createImageResolver(
     // クエリ・fragment を落として decode したパスを優先し、それで読めなければ
     // src そのもの (`?` / `#` / `%` を含むファイル名) でも試す。
     const path = imagePath(src);
-    const candidates = [
-      ...expand(path),
-      ...(src === path ? [] : expand(src)),
-    ];
+    const candidates = [...expand(path), ...(src === path ? [] : expand(src))];
 
     for (const candidate of candidates) {
       try {
         return { mime, data: await deps.readFile(candidate) };
-      } catch {
-        continue;
-      }
+      } catch {}
     }
 
     return null;
