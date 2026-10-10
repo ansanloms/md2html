@@ -8,6 +8,7 @@ import { expect, test } from "bun:test";
 import { dirname } from "node:path";
 import { type CliDeps, main } from "./cli.ts";
 import { MERMAID_VERSION } from "./lib/mermaid.ts";
+import pkg from "./package.json";
 
 const CLI_PATH = new URL("./cli.ts", import.meta.url).pathname;
 const REPO_ROOT = dirname(CLI_PATH);
@@ -61,7 +62,7 @@ test("--help は使い方を stdout に出して 0 で終わる", async () => {
 test("--version は package.json の version を stdout に出して 0 で終わる", async () => {
   const { code, stdout } = await runCli(["--version"]);
   expect(code).toEqual(0);
-  expect(stdout.trim()).toEqual("0.1.0");
+  expect(stdout.trim()).toEqual(pkg.version);
 });
 
 test("未知のオプションはエラーになる", async () => {
