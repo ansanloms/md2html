@@ -14,7 +14,7 @@
     "build": "bun build --compile ./cli.ts --outfile dist/md2html"
   },
   "dependencies": {
-    "@shikijs/rehype": "4.4.3",
+    "@shikijs/rehype": "4.5.0",
     "rehype-github-alerts": "4.2.0",
     "rehype-raw": "7.0.0",
     "rehype-stringify": "10.0.1",
