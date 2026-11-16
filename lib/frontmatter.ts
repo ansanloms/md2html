@@ -13,14 +13,6 @@ export interface Md2htmlOptions {
    * 空配列は「既定を外す (mermaid 図のみ)」を意味する。
    */
   zoomTargets?: string[];
-  /** mermaid の設定。 */
-  mermaid?: MermaidOptions;
-}
-
-/** frontmatter の `md2html.mermaid` 名前空間で指定する mermaid の設定。 */
-export interface MermaidOptions {
-  /** mermaid の npm バージョン指定子。未指定なら lib/mermaid.ts の MERMAID_VERSION。 */
-  version?: string;
 }
 
 /** frontmatter から読み取る既知のキー。 */
@@ -42,6 +34,12 @@ export interface ParsedMarkdown {
   /** frontmatter ブロックを取り除いた本文。frontmatter が無ければ入力そのまま。 */
   body: string;
   /**
+   * 入力 markdown の先頭から body の先頭までに取り除いた行数。
+   * frontmatter ブロック (区切り行を含む) を取り除いた場合はその行数、
+   * frontmatter が無い・入力をそのまま返す場合は 0。body 内の行番号を入力上の行番号へ直すのに使う。
+   */
+  bodyLineOffset: number;
+  /**
    * `md2html` 名前空間の指定が不正で無視・除外された箇所の警告文 (日本語)。
    * 変換自体は続行するため、呼び出し側が利用者へ知らせる。問題が無ければ空配列。
    */
@@ -54,6 +52,13 @@ export interface ParsedMarkdown {
  */
 function isEmptyValue(value: unknown): boolean {
   return value === undefined || value === null || value === "";
+}
+
+/** 取り除いた先頭部分 (frontmatter ブロック) の行数を数える。LF / CRLF とも `\n` の数で数える。 */
+function countRemovedLines(markdown: string, body: string): number {
+  const removed = markdown.slice(0, markdown.length - body.length);
+  const newlines = removed.split("\n").length - 1;
+  return removed.endsWith("\n") ? newlines : newlines + 1;
 }
 
 /** 非空の文字列ならそのまま返す。空文字列・文字列以外は undefined (未指定扱い)。 */
@@ -114,7 +119,7 @@ export function parseFrontmatter(input: string): ParsedMarkdown {
   const markdown = input.startsWith("\uFEFF") ? input.slice(1) : input;
   const split = splitFrontmatter(markdown);
   if (split === null) {
-    return { frontmatter: {}, body: markdown, warnings: [] };
+    return { frontmatter: {}, body: markdown, bodyLineOffset: 0, warnings: [] };
   }
 
   const { frontMatter, body } = split;
@@ -133,13 +138,18 @@ export function parseFrontmatter(input: string): ParsedMarkdown {
 
   // コメントだけ等で YAML 文書が空 (null) の場合は空の frontmatter として扱い、ブロックは本文から除く。
   if (attrs === null || attrs === undefined) {
-    return { frontmatter: {}, body, warnings: [] };
+    return {
+      frontmatter: {},
+      body,
+      bodyLineOffset: countRemovedLines(markdown, body),
+      warnings: [],
+    };
   }
 
   // スカラ・配列など、マッピングでない YAML は frontmatter とみなさず入力をそのまま返す
   // (先頭の `---` 水平線を frontmatter と誤認して本文を欠落させないため)。
   if (typeof attrs !== "object" || Array.isArray(attrs)) {
-    return { frontmatter: {}, body: markdown, warnings: [] };
+    return { frontmatter: {}, body: markdown, bodyLineOffset: 0, warnings: [] };
   }
 
   const record = attrs as Record<string, unknown>;
@@ -184,30 +194,26 @@ export function parseFrontmatter(input: string): ParsedMarkdown {
         frontmatter.md2html = { ...frontmatter.md2html, zoomTargets };
       }
 
-      const rawMermaid = (md2html as Record<string, unknown>).mermaid;
+      // mermaid は変換時に pele で描画するようになり、設定項目は廃止した。
       // 値の無いキー (`mermaid:` だけ書いた等) は未設定として扱い、警告もしない。
-      if (!isEmptyValue(rawMermaid)) {
-        if (typeof rawMermaid !== "object" || Array.isArray(rawMermaid)) {
-          warnings.push(
-            "frontmatter の md2html.mermaid はマッピングでないため無視した",
-          );
-        } else {
-          const rawVersion = (rawMermaid as Record<string, unknown>).version;
-          if (isEmptyValue(rawVersion)) {
-            // 既知のキーが無い・値が空なら未設定のまま (警告もしない)。
-          } else if (typeof rawVersion !== "string") {
-            warnings.push(
-              "frontmatter の md2html.mermaid.version は文字列でないため無視した",
-            );
-          } else {
-            frontmatter.md2html = {
-              ...frontmatter.md2html,
-              mermaid: { version: rawVersion },
-            };
-          }
-        }
+      // mermaid がマッピングで値がすべて空 (`version:` だけ等) の場合も未設定として扱う。
+      const mermaid = (md2html as Record<string, unknown>).mermaid;
+      const mermaidIsBlank =
+        isEmptyValue(mermaid) ||
+        (typeof mermaid === "object" &&
+          !Array.isArray(mermaid) &&
+          Object.values(mermaid as Record<string, unknown>).every(
+            isEmptyValue,
+          ));
+      if (!mermaidIsBlank) {
+        warnings.push("frontmatter の md2html.mermaid は廃止したため無視した");
       }
     }
   }
-  return { frontmatter, body, warnings };
+  return {
+    frontmatter,
+    body,
+    bodyLineOffset: countRemovedLines(markdown, body),
+    warnings,
+  };
 }

@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@shikijs/rehype": "4.6.0",
+    "pele": "1.13.0",
     "rehype-github-alerts": "4.2.0",
     "rehype-raw": "7.0.0",
     "rehype-stringify": "10.0.1",

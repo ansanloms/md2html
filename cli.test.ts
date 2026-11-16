@@ -2,12 +2,10 @@
 //
 // 変換ロジックそのものは lib/convert.test.ts が検証するので、ここでは CLI の
 // 引数解釈・終了コード・stdin 入力といった実行時の振る舞いだけを見る。
-// mermaid ブロックは含めない (含めると子プロセスが jsdelivr へ取得に行く)。
 
 import { expect, test } from "bun:test";
 import { dirname } from "node:path";
 import { type CliDeps, main } from "./cli.ts";
-import { MERMAID_VERSION } from "./lib/mermaid.ts";
 import pkg from "./package.json";
 
 const CLI_PATH = new URL("./cli.ts", import.meta.url).pathname;
@@ -56,7 +54,7 @@ test("--help は使い方を stdout に出して 0 で終わる", async () => {
   expect(code).toEqual(0);
   expect(stdout).toContain("使い方: md2html");
   expect(stdout).toContain("--version");
-  expect(stdout).toContain("--mermaid-version");
+  expect(stdout).not.toContain("--mermaid-version");
 });
 
 test("--version は package.json の version を stdout に出して 0 で終わる", async () => {
@@ -218,32 +216,17 @@ md2html: img
   expect(stdout).toContain("<h1");
 });
 
-test("--mermaid-version の形式が不正なら exit 1 で指定元を含むエラーになる", async () => {
+test("--mermaid-version は廃止したため使い方エラーになる", async () => {
   const { code, stderr } = await runCli(
-    ["--mermaid-version", "../x", "-"],
+    ["--mermaid-version", "11.0.0", "-"],
     SIMPLE_MARKDOWN,
   );
   expect(code).toEqual(1);
-  expect(stderr).toContain(
-    'mermaid のバージョン指定 "../x" (--mermaid-version) の形式が不正です',
-  );
+  expect(stderr).toContain("不明なオプション: --mermaid-version");
+  expect(stderr).toContain("使い方: md2html");
 });
 
-test("frontmatter の md2html.mermaid.version の形式が不正なら exit 1 になる", async () => {
-  const markdown = `---
-md2html:
-  mermaid:
-    version: "^11"
----
-
-# 見出し
-`;
-  const { code, stderr } = await runCli(["-"], markdown);
-  expect(code).toEqual(1);
-  expect(stderr).toContain("(frontmatter の md2html.mermaid.version)");
-});
-
-test("frontmatter の md2html.mermaid が不正なら stderr へ警告を出しつつ変換は続ける", async () => {
+test("frontmatter の md2html.mermaid が書かれていたら廃止の警告を出しつつ変換は続ける", async () => {
   const markdown = `---
 md2html:
   mermaid: x
@@ -254,7 +237,7 @@ md2html:
   const { code, stdout, stderr } = await runCli(["-"], markdown);
   expect(code).toEqual(0);
   expect(stderr).toContain(
-    "md2html: frontmatter の md2html.mermaid はマッピングでないため無視した",
+    "md2html: frontmatter の md2html.mermaid は廃止したため無視した",
   );
   expect(stdout).toContain("<h1");
 });
@@ -273,7 +256,6 @@ function fakeDeps(overrides: Partial<CliDeps> = {}): {
     readTextFile: () => Promise.reject(new Error("not implemented")),
     readFile: () => Promise.reject(new Error("not implemented")),
     writeTextFile: () => Promise.reject(new Error("not implemented")),
-    getMermaidJs: () => Promise.resolve("/* mermaid stub */"),
     log: (text) => out.push(text),
     error: (text) => err.push(text),
     ...overrides,
@@ -311,96 +293,36 @@ test("main(): stdin 入力を変換して out に積む", async () => {
   expect(out[0]).toContain("<h1");
 });
 
-const MERMAID_MARKDOWN = "```mermaid\ngraph TD; A-->B;\n```\n";
-
-/** mermaid バージョン検証テスト用に、渡された version を記録する fakeDeps を作る。 */
-function fakeDepsRecordingMermaidVersion(
-  markdown: string,
-  overrides: Partial<CliDeps> = {},
-): { deps: CliDeps; out: string[]; err: string[]; versions: string[] } {
-  const versions: string[] = [];
+test("main(): 描画できない mermaid 図は stderr に警告を出し、exit 0 で続行する", async () => {
+  const markdown =
+    "```mermaid\ngraph TD; A-->B;\n```\n\n```mermaid\nthis is not a diagram\n```\n";
   const { deps, out, err } = fakeDeps({
     stdinIsTerminal: () => false,
     readStdin: () => Promise.resolve(markdown),
-    getMermaidJs: (version) => {
-      versions.push(version);
-      return Promise.resolve("/* mermaid stub */");
-    },
-    ...overrides,
   });
-  return { deps, out, err, versions };
-}
-
-test("main(): 既定では MERMAID_VERSION が getMermaidJs に渡る", async () => {
-  const { deps, versions } = fakeDepsRecordingMermaidVersion(MERMAID_MARKDOWN);
   const code = await main([], deps);
   expect(code).toEqual(0);
-  expect(versions).toEqual([MERMAID_VERSION]);
+  const warnings = err.filter((line) =>
+    line.startsWith("md2html: mermaid 図 "),
+  );
+  expect(warnings.length).toEqual(1);
+  expect(warnings[0]).toContain("2 個目");
+  expect(out[0]).toContain('class="pele pele-flowchart"');
 });
 
-test("main(): frontmatter の md2html.mermaid.version が getMermaidJs に渡る", async () => {
-  const markdown = `---
-md2html:
-  mermaid:
-    version: 11.0.0
----
-
-${MERMAID_MARKDOWN}`;
-  const { deps, versions } = fakeDepsRecordingMermaidVersion(markdown);
-  const code = await main([], deps);
-  expect(code).toEqual(0);
-  expect(versions).toEqual(["11.0.0"]);
-});
-
-test("main(): --mermaid-version は frontmatter より優先される", async () => {
-  const markdown = `---
-md2html:
-  mermaid:
-    version: 11.0.0
----
-
-${MERMAID_MARKDOWN}`;
-  const { deps, versions } = fakeDepsRecordingMermaidVersion(markdown);
-  const code = await main(["--mermaid-version", "11.1.0"], deps);
-  expect(code).toEqual(0);
-  expect(versions).toEqual(["11.1.0"]);
-});
-
-test('main(): --mermaid-version "" は未指定扱い', async () => {
-  const markdown = `---
-md2html:
-  mermaid:
-    version: 11.0.0
----
-
-${MERMAID_MARKDOWN}`;
-  const { deps, versions } = fakeDepsRecordingMermaidVersion(markdown);
-  const code = await main(["--mermaid-version", ""], deps);
-  expect(code).toEqual(0);
-  expect(versions).toEqual(["11.0.0"]);
-});
-
-test("main(): getMermaidJs が失敗すると版と指定元を含むエラーで 1 を返す", async () => {
-  const markdown = `---
-md2html:
-  mermaid:
-    version: 11.0.0
----
-
-${MERMAID_MARKDOWN}`;
+test("main(): frontmatter 付き入力の mermaid 警告は入力ファイル上の行番号を指す", async () => {
+  const markdown =
+    "---\ntitle: t\ndescription: d\nlang: ja\n---\n\n本文\n\n```mermaid\nthis is not a diagram\n```\n";
   const { deps, err } = fakeDeps({
     stdinIsTerminal: () => false,
     readStdin: () => Promise.resolve(markdown),
-    getMermaidJs: () =>
-      Promise.reject(new Error("mermaid の取得に失敗した: boom")),
   });
   const code = await main([], deps);
-  expect(code).toEqual(1);
-  expect(
-    err.some((line) =>
-      line.includes(
-        "mermaid 11.0.0 (frontmatter の md2html.mermaid.version) の取得に失敗した: mermaid の取得に失敗した: boom",
-      ),
-    ),
-  ).toBe(true);
+  expect(code).toEqual(0);
+  const warnings = err.filter((line) =>
+    line.startsWith("md2html: mermaid 図 "),
+  );
+  expect(warnings.length).toEqual(1);
+  // ```mermaid は入力ファイルの 9 行目。
+  expect(warnings[0]).toContain("1 個目、9行目付近");
 });

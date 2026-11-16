@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
-import { MERMAID_RENDER_JS, ZOOM_JS } from "./assets.ts";
+import { ZOOM_JS } from "./assets.ts";
 import {
   type ConvertOptions,
   convert,
   DEFAULT_LABELS,
   DEFAULT_ZOOM_TARGETS,
+  escapeScriptClose,
   slugify,
   ZOOM_LABEL_KEYS,
 } from "./convert.ts";
@@ -18,7 +19,6 @@ const DEFAULT_ZOOM_TARGETS_JSON = `<script type="application/json" id="md2html-z
 function baseOptions(overrides: Partial<ConvertOptions> = {}): ConvertOptions {
   return {
     title: "テスト",
-    getMermaidJs: () => Promise.resolve("/* mermaid stub */"),
     resolveImage: () => Promise.resolve(null),
     ...overrides,
   };
@@ -33,22 +33,97 @@ test("コードブロックは shiki でインライン style 化される", asy
   expect(html).toContain("style=");
 });
 
-test("mermaid ブロックは pre.mermaid に変換され mermaid bundle と描画スクリプトが classic script で埋め込まれる", async () => {
+test("mermaid ブロックは変換時に SVG 化され figure.mermaid-fig へ直接埋め込まれる", async () => {
   const html = await convert(
     "```mermaid\ngraph TD\n  A --> B\n```\n",
-    baseOptions({ getMermaidJs: () => Promise.resolve("/* mermaid stub */") }),
+    baseOptions(),
   );
-  expect(html).toContain('<pre class="mermaid">');
-  expect(html).toContain("graph TD");
-  expect(html).toContain("<script>/* mermaid stub */</script><script>");
-  expect(html).toContain(MERMAID_RENDER_JS);
+  expect(html).toContain(
+    '<figure class="mermaid-fig" tabindex="0" role="button" aria-label="図を拡大表示">',
+  );
+  expect(html).toContain('class="pele pele-flowchart"');
+  expect(html.includes('<pre class="mermaid"')).toEqual(false);
+  // 描画をブラウザへ任せない: mermaid 用のスクリプトも CDN 参照も無い。
+  expect(html.includes("mermaid.min.js")).toEqual(false);
+  expect(html.includes("cdn.jsdelivr.net")).toEqual(false);
   expect(html.includes('<script type="module">')).toEqual(false);
 });
 
-test("mermaid ブロックが無ければ mermaid スクリプトは埋め込まれない", async () => {
-  const html = await convert("# hello\n", baseOptions());
-  expect(html.includes(MERMAID_RENDER_JS)).toEqual(false);
-  expect(html.includes("mermaid stub")).toEqual(false);
+test("mermaid ブロックがあれば zoom.js が埋め込まれ、無ければ埋め込まれない", async () => {
+  const withMermaid = await convert(
+    "```mermaid\ngraph TD\n  A --> B\n```\n",
+    baseOptions(),
+  );
+  expect(withMermaid).toContain('const TARGETS_ID = "md2html-zoom-targets";');
+
+  const without = await convert("# hello\n", baseOptions());
+  expect(
+    without.includes('const TARGETS_ID = "md2html-zoom-targets";'),
+  ).toEqual(false);
+});
+
+test("2 図を含む文書で SVG の id 属性が重複しない", async () => {
+  const html = await convert(
+    "```mermaid\ngraph TD\n  A --> B\n```\n\n```mermaid\ngraph TD\n  C --> D\n```\n",
+    baseOptions(),
+  );
+  const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
+  expect(ids.length).toBeGreaterThan(0);
+  expect(new Set(ids).size).toEqual(ids.length);
+});
+
+test("構文エラーの mermaid 図はコードブロックとして残り、onWarning が 1 回呼ばれ、正常な図は描画される", async () => {
+  const warnings: string[] = [];
+  const html = await convert(
+    "# t\n\n```mermaid\ngraph TD\n  A --> B\n```\n\n```mermaid\nthis is not a diagram\n```\n",
+    baseOptions({ onWarning: (message) => warnings.push(message) }),
+  );
+  expect(html).toContain('class="pele pele-flowchart"');
+  expect(html).toContain("this is not a diagram");
+  expect(html).toContain("language-mermaid");
+  expect(warnings.length).toEqual(1);
+  expect(warnings[0]).toContain(
+    "mermaid 図 (2 個目、8行目付近) を描画できない",
+  );
+  expect(warnings[0]).toContain("コードブロックのまま残した: ");
+});
+
+test("lineOffset は mermaid 図の警告の行番号に足される", async () => {
+  const warnings: string[] = [];
+  await convert(
+    "# t\n\n```mermaid\nthis is not a diagram\n```\n",
+    baseOptions({
+      onWarning: (message) => warnings.push(message),
+      lineOffset: 5,
+    }),
+  );
+  expect(warnings.length).toEqual(1);
+  expect(warnings[0]).toContain("1 個目、8行目付近");
+});
+
+test("escapeScriptClose は大文字小文字を問わず </script を残さない", () => {
+  for (const input of [
+    "a</script>b",
+    "a</SCRIPT>b",
+    "a</ScRiPt>b",
+    "x</script",
+    "</script",
+    "</script></script>",
+  ]) {
+    expect(/<\/script/i.test(escapeScriptClose(input))).toEqual(false);
+  }
+  expect(escapeScriptClose("a</script>b")).toEqual("a<\\/script>b");
+  expect(escapeScriptClose("no close tag")).toEqual("no close tag");
+});
+
+test("日本語ラベルの mermaid 図が描画される", async () => {
+  const html = await convert(
+    "```mermaid\ngraph TD\n  A[開始] --> B[終了]\n```\n",
+    baseOptions(),
+  );
+  expect(html).toContain('class="pele pele-flowchart"');
+  expect(html).toContain("開始");
+  expect(html).toContain("終了");
 });
 
 test("未知言語・言語未指定ブロックでも throw しない", async () => {
@@ -333,12 +408,13 @@ test("convert: 複数言語のコードブロックがそれぞれ shiki 出力�
   expect(html).toContain("language-python");
 });
 
-test("convert: mermaid と ts の混在では mermaid は pre.mermaid、ts は shiki 出力になる", async () => {
+test("convert: mermaid と ts の混在では mermaid は figure、ts は shiki 出力になる", async () => {
   const html = await convert(
     "```mermaid\ngraph TD\n  A --> B\n```\n\n```ts\nconst x = 1;\n```\n",
     baseOptions(),
   );
-  expect(html).toContain('<pre class="mermaid">');
+  expect(html).toContain('<figure class="mermaid-fig"');
+  expect(html.includes('<pre class="mermaid"')).toEqual(false);
   expect(html).toContain('class="shiki');
 });
 
@@ -389,10 +465,6 @@ test("ZOOM_JS は mermaid ブロックがあるとき注入され、既定の zo
   );
   expect(html).toContain('const TARGETS_ID = "md2html-zoom-targets";');
   expect(html).toContain(DEFAULT_ZOOM_TARGETS_JSON);
-  // zoom.js は mermaid bundle より前に置かれる。
-  const zoomIndex = html.indexOf('const TARGETS_ID = "md2html-zoom-targets";');
-  const mermaidIndex = html.indexOf("/* mermaid stub */");
-  expect(zoomIndex !== -1 && zoomIndex < mermaidIndex).toEqual(true);
 });
 
 test("ZOOM_JS と zoomTargets の JSON は frontmatter に zoomTargets があるとき注入される", async () => {
@@ -508,12 +580,15 @@ test("テーマ CSS 側も </style> のエスケープ対象になる", async ()
   expect(html.split("</style>").length - 1).toEqual(1);
 });
 
-test("mermaid bundle の </script> はエスケープされ script を早期終了させない", async () => {
+test("埋め込みスクリプトの </script は各 script 要素の閉じタグ以外に現れない", async () => {
   const html = await convert(
-    "```mermaid\ngraph TD\n  A --> B\n```\n",
-    baseOptions({ getMermaidJs: () => Promise.resolve("a</script>b") }),
+    "```mermaid\ngraph TD\n  A --> B\n```\n\n```ts\nconst x = 1;\n```\n",
+    baseOptions(),
   );
-  expect(html).toContain("<script>a<\\/script>b</script>");
+  const opens = html.match(/^<script[\s>]/gim)?.length ?? 0;
+  const closes = html.match(/<\/script/gi)?.length ?? 0;
+  expect(opens).toBeGreaterThan(0);
+  expect(closes).toEqual(opens);
 });
 
 test("html lang は既定で ja、lang オプションで上書きできる", async () => {

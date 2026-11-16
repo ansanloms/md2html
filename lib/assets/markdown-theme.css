@@ -551,6 +551,22 @@ button {
   overflow: hidden;
   transition: border-color 0.14s;
 }
+/* pele が出力する SVG の色変数を既存のテーマ変数へ対応付ける (ダークは :root 側の切り替えに乗る)。
+   拡大モーダルでは svg だけが body 直下の dialog へ複製されるため、.mermaid-fig ではなく svg ルート (.pele) に当てる。 */
+.pele {
+  --pele-bg: var(--bg-subtle);
+  --pele-fg: var(--fg);
+  --pele-muted: var(--fg-muted);
+  --pele-line: var(--fg-muted);
+  --pele-surface: var(--bg);
+  --pele-surface-alt: var(--bg-code);
+  --pele-border: var(--border);
+  --pele-accent: var(--accent);
+  --pele-critical: var(--alert-caution);
+  --pele-error: var(--alert-caution);
+  --pele-font: var(--font-body);
+  --pele-font-mono: var(--font-mono);
+}
 .md .mermaid-fig:hover {
   border-color: var(--border);
 }
