@@ -1,4 +1,4 @@
-// markdown ファイルを自己完結 HTML (シンタックスハイライト + mermaid 内蔵) へ変換する CLI。
+// markdown ファイルを自己完結 HTML (シンタックスハイライト + mermaid の SVG 化) へ変換する CLI。
 //
 // 使い方は USAGE 定数を参照 (--help でも表示する)。
 //
@@ -7,60 +7,38 @@
 // 対象へ反映する (未指定なら既定で画像が対象)。frontmatter ブロックは本文から除く。
 // md2html 名前空間の指定が不正なら警告を stderr へ出したうえで無視する。
 //
-// mermaid は jsdelivr の mermaid.min.js (IIFE) を初回のみ取得し、
-// ~/.cache/md2html/ (または $XDG_CACHE_HOME/md2html/) へキャッシュする。
-// 以降はキャッシュを読むだけでネットワークを必要としない。
+// mermaid 図は変換時に pele で SVG 化して埋め込む (ネットワーク不要)。描画できない図は
+// 警告を stderr へ出し、コードブロックのまま残す。
 //
 // ローカル画像は入力ファイルのディレクトリを基準に解決し (lib/image.ts)、見つからなければ
 // cwd 基準へフォールバックする。
 //
 // 変換ロジックは lib/convert.ts の convert() に分離し、副作用 (ファイル読み書き・
-// mermaid 取得・キャッシュ) はここで組み立てて注入する。
+// 警告の出力) はここで組み立てて注入する。
 //
 // ライブラリとして import する場合は mod.ts を使う。
 
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { parseArgs } from "node:util";
 import { convert } from "./lib/convert.ts";
 import { type Frontmatter, parseFrontmatter } from "./lib/frontmatter.ts";
 import { createImageResolver } from "./lib/image.ts";
-import {
-  getMermaidBundle,
-  isValidMermaidVersion,
-  MERMAID_VERSION,
-  type MermaidFetchDeps,
-} from "./lib/mermaid.ts";
 import pkg from "./package.json";
 
 /**
  * --help および引数エラー時に出す使い方。
  * ファイル冒頭コメント・README・エラー出力で文面を分散させないため、ここに一本化する。
  */
-const USAGE = `使い方: md2html [<input.md>] [--output <path>] [--css <path>] [--title <title>] [--lang <lang>] [--mermaid-version <version>]
+const USAGE = `使い方: md2html [<input.md>] [--output <path>] [--css <path>] [--title <title>] [--lang <lang>]
   <input.md>  入力 markdown ファイル。省略するか "-" を指定すると stdin から読む。
   --output    出力先パス。省略時は stdout。
   --css       追記するユーザ CSS ファイルのパス。
   --title     HTML の <title>。省略時は frontmatter の title、それも無ければ
               入力ファイル名 (stdin から読む場合は "md2html")。
   --lang      HTML の <html lang>。省略時は frontmatter の lang、それも無ければ "ja"。
-  --mermaid-version
-              mermaid の npm バージョン。省略時は frontmatter の md2html.mermaid.version、
-              それも無ければ ${MERMAID_VERSION}。
   --help      この使い方を表示する。
   --version   バージョンを表示する。`;
-
-const mermaidFetchDeps: MermaidFetchDeps = {
-  env: (key) => process.env[key],
-  readTextFile: (path) => readFile(path, "utf8"),
-  writeTextFile: (path, text) => writeFile(path, text),
-  mkdir: async (path) => {
-    await mkdir(path, { recursive: true });
-  },
-  rename: (from, to) => rename(from, to),
-  remove: (path) => rm(path, { recursive: true, force: true }),
-  fetch: (url, init) => globalThis.fetch(url, init),
-};
 
 /** CLI の副作用をまとめた依存。テストでは差し替える。 */
 export interface CliDeps {
@@ -71,8 +49,6 @@ export interface CliDeps {
   readTextFile: (path: string) => Promise<string>;
   readFile: (path: string) => Promise<Uint8Array>;
   writeTextFile: (path: string, text: string) => Promise<void>;
-  /** 指定した npm バージョンの mermaid.min.js (globalThis.mermaid を定義する classic script) の本文を返す。 */
-  getMermaidJs: (version: string) => Promise<string>;
   /** stdout へ 1 行書く (console.log 相当)。 */
   log: (text: string) => void;
   /** stderr へ 1 行書く (console.error 相当)。 */
@@ -86,7 +62,6 @@ export const bunDeps: CliDeps = {
   readTextFile: (path) => readFile(path, "utf8"),
   readFile: (path) => readFile(path),
   writeTextFile: (path, text) => writeFile(path, text),
-  getMermaidJs: (version) => getMermaidBundle(mermaidFetchDeps, version),
   log: (text) => {
     process.stdout.write(text + "\n");
   },
@@ -113,7 +88,6 @@ const PARSE_OPTIONS = {
   css: { type: "string" },
   title: { type: "string" },
   lang: { type: "string" },
-  "mermaid-version": { type: "string" },
   help: { type: "boolean" },
   version: { type: "boolean" },
 } as const;
@@ -290,8 +264,10 @@ export async function main(
   let frontmatter: Frontmatter;
   let body: string;
   let warnings: string[];
+  let bodyLineOffset: number;
   try {
-    ({ frontmatter, body, warnings } = parseFrontmatter(markdown));
+    ({ frontmatter, body, warnings, bodyLineOffset } =
+      parseFrontmatter(markdown));
   } catch (error) {
     deps.error(`md2html: ${messageOf(error)}`);
     return 1;
@@ -314,26 +290,6 @@ export async function main(
   // 空の --lang も同様に未指定として扱う。
   const lang = (values.lang || undefined) ?? frontmatter.lang;
 
-  // mermaid のバージョンも CLI > frontmatter > 既定。空の --mermaid-version は未指定扱い。
-  const cliMermaidVersion = values["mermaid-version"] || undefined;
-  const frontmatterMermaidVersion = frontmatter.md2html?.mermaid?.version;
-  const mermaidVersion =
-    cliMermaidVersion ?? frontmatterMermaidVersion ?? MERMAID_VERSION;
-  const mermaidVersionSource =
-    cliMermaidVersion !== undefined
-      ? "--mermaid-version"
-      : frontmatterMermaidVersion !== undefined
-        ? "frontmatter の md2html.mermaid.version"
-        : "既定";
-  // 指定子はキャッシュのファイル名と bundle エントリに埋め込むため、mermaid ブロックの有無に
-  // 関わらずここで形式を検査し、指定元を添えて弾く。
-  if (!isValidMermaidVersion(mermaidVersion)) {
-    deps.error(
-      `md2html: mermaid のバージョン指定 "${mermaidVersion}" (${mermaidVersionSource}) の形式が不正です (先頭は英数字、以降は英数字・"."・"-"・"+" のみ)`,
-    );
-    return 1;
-  }
-
   let html: string;
   try {
     html = await convert(body, {
@@ -341,17 +297,8 @@ export async function main(
       frontmatter,
       lang,
       css,
-      getMermaidJs: async () => {
-        try {
-          return await deps.getMermaidJs(mermaidVersion);
-        } catch (error) {
-          throw new Error(
-            `mermaid ${mermaidVersion} (${mermaidVersionSource}) の取得に失敗した: ${messageOf(
-              error,
-            )}`,
-          );
-        }
-      },
+      onWarning: (message) => deps.error(`md2html: ${message}`),
+      lineOffset: bodyLineOffset,
       resolveImage: createImageResolver({
         readFile: deps.readFile,
         baseDir: dirname(inputPath),

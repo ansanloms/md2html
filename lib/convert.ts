@@ -1,8 +1,9 @@
 // markdown -> 自己完結 HTML 変換の純粋ロジック。
-// 副作用 (mermaid bundle の取得・キャッシュ、ローカル画像の読み込み) は
-// ConvertOptions 経由で呼び出し側から注入する。
+// 副作用 (ローカル画像の読み込み) は ConvertOptions 経由で呼び出し側から注入する。
+// mermaid 図は変換時に pele で SVG 化して HTML へ直接埋め込む (ネットワーク取得なし)。
 
 import rehypeShiki from "@shikijs/rehype";
+import { render } from "pele";
 import { rehypeGithubAlerts } from "rehype-github-alerts";
 import rehypeRaw from "rehype-raw";
 import rehypeStringify from "rehype-stringify";
@@ -11,12 +12,7 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
-import {
-  CODE_COPY_JS,
-  MARKDOWN_THEME_CSS,
-  MERMAID_RENDER_JS,
-  ZOOM_JS,
-} from "./assets.ts";
+import { CODE_COPY_JS, MARKDOWN_THEME_CSS, ZOOM_JS } from "./assets.ts";
 import type { Frontmatter } from "./frontmatter.ts";
 
 export interface ResolvedImage {
@@ -124,8 +120,16 @@ export interface ConvertOptions {
   labels?: Partial<Labels>;
   /** 追記するユーザ CSS (テキスト)。 */
   css?: string;
-  /** mermaid ブロックがあるときだけ呼ばれる。mermaid.min.js (globalThis.mermaid を定義する classic script) の本文を返す。 */
-  getMermaidJs: () => Promise<string>;
+  /**
+   * 変換は続行するが利用者へ知らせたい事象 (描画できなかった mermaid 図など) の通知先。
+   * 省略時は通知しない。
+   */
+  onWarning?: (message: string) => void;
+  /**
+   * 渡した markdown の 1 行目が入力ファイルの何行目の次に当たるか。警告の行番号に足す。
+   * frontmatter を取り除いた本文を渡すとき、parseFrontmatter の bodyLineOffset を渡す。省略時 0。
+   */
+  lineOffset?: number;
   /** http(s): / data: 以外の img src を解決する。読めなければ null を返す。 */
   resolveImage: (src: string) => Promise<ResolvedImage | null>;
 }
@@ -165,12 +169,20 @@ function extractText(node: HastNode): string {
 }
 
 /**
- * `pre > code.language-mermaid` を `<pre class="mermaid">生コード</pre>` へ置換する
- * rehype プラグイン。@shikijs/rehype より前に適用し、shiki のハイライト対象から外す。
- * mermaid ブロックを 1 つでも変換したら used.value を true にする。
+ * `pre > code.language-mermaid` を pele で SVG 化し、`figure.mermaid-fig` へ置換する
+ * rehype プラグイン。@shikijs/rehype より前に適用する。SVG は raw ノードで直接差し込む。
+ * 描画できない図 (PeleError を含む任意の例外) は置換せず残し (後段の shiki が
+ * コードブロックとしてハイライトする)、onWarning へ通知する。
+ * mermaid 図を 1 つでも描画したら used.value を true にする。
  */
-function rehypeMermaid(used: { value: boolean }) {
+function rehypeMermaid(
+  used: { value: boolean },
+  labels: Labels,
+  onWarning: ConvertOptions["onWarning"],
+  lineOffset: number,
+) {
   return (tree: HastNode) => {
+    let count = 0;
     visit(
       tree,
       "element",
@@ -200,11 +212,35 @@ function rehypeMermaid(used: { value: boolean }) {
           return;
         }
 
+        const n = count;
+        count += 1;
+
+        let svg: string;
+        try {
+          ({ svg } = render(extractText(codeChild), {
+            idPrefix: `md2html-mermaid-${n}`,
+          }));
+        } catch (error) {
+          const line = node.position?.start?.line;
+          const where =
+            typeof line === "number" ? `、${line + lineOffset}行目付近` : "";
+          const reason = error instanceof Error ? error.message : String(error);
+          onWarning?.(
+            `mermaid 図 (${n + 1} 個目${where}) を描画できないため、コードブロックのまま残した: ${reason}`,
+          );
+          return;
+        }
+
         parent.children[index] = {
           type: "element",
-          tagName: "pre",
-          properties: { className: ["mermaid"] },
-          children: [{ type: "text", value: extractText(codeChild) }],
+          tagName: "figure",
+          properties: {
+            className: ["mermaid-fig"],
+            tabIndex: 0,
+            role: "button",
+            ariaLabel: formatLabel(labels.zoomImageLabel, labels.figure),
+          },
+          children: [{ type: "raw", value: svg }],
         };
         used.value = true;
       },
@@ -304,7 +340,7 @@ function rehypeTableWrap() {
 }
 
 /**
- * shiki 変換後の `pre` (mermaid は既に pre.mermaid へ退避済みのため対象外) を
+ * shiki 変換後の `pre` (描画済みの mermaid は既に figure へ置換済みのため対象外) を
  * `<div class="code-block">` で包み、言語ラベル (フェンスに言語指定があった
  * 場合のみ) と `<button class="code-copy">` を付ける rehype プラグイン。
  * @shikijs/rehype より後に適用する。コードブロックを 1 つでも変換したら
@@ -483,7 +519,7 @@ function escapeHtml(text: string): string {
  * 埋め込み <script> 内の `</script` によるタグの早期終了を防ぐ。
  * JS では文字列・正規表現中の `\/` は `/` のエスケープとして解釈されるため意味は変わらない。
  */
-function escapeScriptClose(js: string): string {
+export function escapeScriptClose(js: string): string {
   return js.replace(/<\/script/gi, (match) => `<\\${match.slice(1)}`);
 }
 
@@ -530,7 +566,13 @@ export async function convert(
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw)
     .use(rehypeGithubAlerts, {})
-    .use(rehypeMermaid, mermaidUsed)
+    .use(
+      rehypeMermaid,
+      mermaidUsed,
+      labels,
+      options.onWarning,
+      options.lineOffset ?? 0,
+    )
     .use(rehypeShiki, {
       themes: { light: "github-light", dark: "github-dark" },
       // langs 未指定だと初回適用時に bundled 全 grammar (alias 込み 332 キー)
@@ -558,14 +600,6 @@ export async function convert(
     .process(markdown);
 
   const body = String(file);
-
-  let mermaidScript = "";
-  if (mermaidUsed.value) {
-    const js = await options.getMermaidJs();
-    mermaidScript = `<script>${escapeScriptClose(js)}</script><script>${escapeScriptClose(
-      MERMAID_RENDER_JS,
-    )}</script>`;
-  }
 
   let layoutStyle = "";
   let tocAside = "";
@@ -657,7 +691,6 @@ export async function convert(
     codeCopyScript,
     zoomTargetsJson,
     zoomScript,
-    mermaidScript,
     "</body>",
     "</html>",
   ]

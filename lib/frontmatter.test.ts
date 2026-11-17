@@ -204,76 +204,37 @@ test("md2html.zoomTargets が配列でなければ警告する", () => {
   ).toEqual(["frontmatter の md2html.zoomTargets は配列でないため無視した"]);
 });
 
-test("md2html.mermaid.version は文字列として読み取る", () => {
+const MERMAID_DEPRECATED =
+  "frontmatter の md2html.mermaid は廃止したため無視した";
+
+test("md2html.mermaid.version は廃止の警告が出て frontmatter.md2html.mermaid に入らない", () => {
   const result = parseFrontmatter(
     "---\nmd2html:\n  mermaid:\n    version: 11.16.0\n---\nbody\n",
   );
-  expect(result.frontmatter).toEqual({
-    md2html: { mermaid: { version: "11.16.0" } },
-  });
-  expect(result.warnings).toEqual([]);
-
-  const latest = parseFrontmatter(
-    "---\nmd2html:\n  mermaid:\n    version: latest\n---\nbody\n",
-  );
-  expect(latest.frontmatter).toEqual({
-    md2html: { mermaid: { version: "latest" } },
-  });
+  expect(result.frontmatter).toEqual({});
+  expect(result.warnings).toEqual([MERMAID_DEPRECATED]);
 });
 
-test("md2html.zoomTargets と md2html.mermaid.version を併記すると両方入る", () => {
+test("md2html.zoomTargets と md2html.mermaid を併記すると zoomTargets だけ入り廃止の警告が出る", () => {
   const result = parseFrontmatter(
     "---\nmd2html:\n  zoomTargets:\n    - img\n  mermaid:\n    version: 11.16.0\n---\nbody\n",
   );
-  expect(result.frontmatter).toEqual({
-    md2html: { zoomTargets: ["img"], mermaid: { version: "11.16.0" } },
-  });
+  expect(result.frontmatter).toEqual({ md2html: { zoomTargets: ["img"] } });
+  expect(result.warnings).toEqual([MERMAID_DEPRECATED]);
 });
 
-test("値の無い md2html.mermaid / mermaid.version は未設定として扱い警告しない", () => {
+test("値の無い md2html.mermaid は未設定として扱い警告しない", () => {
   const noMermaid = parseFrontmatter("---\nmd2html:\n  mermaid:\n---\nbody\n");
   expect(noMermaid.frontmatter).toEqual({});
   expect(noMermaid.warnings).toEqual([]);
-
-  const noVersion = parseFrontmatter(
-    "---\nmd2html:\n  mermaid:\n    version:\n---\nbody\n",
-  );
-  expect(noVersion.frontmatter).toEqual({});
-  expect(noVersion.warnings).toEqual([]);
-
-  const emptyVersion = parseFrontmatter(
-    '---\nmd2html:\n  mermaid:\n    version: ""\n---\nbody\n',
-  );
-  expect(emptyVersion.frontmatter).toEqual({});
-  expect(emptyVersion.warnings).toEqual([]);
 });
 
-test("md2html.mermaid がマッピングでなければ警告する", () => {
-  expect(
-    parseFrontmatter("---\nmd2html:\n  mermaid: 11.16.0\n---\nbody\n").warnings,
-  ).toEqual(["frontmatter の md2html.mermaid はマッピングでないため無視した"]);
-  expect(
-    parseFrontmatter("---\nmd2html:\n  mermaid: 11.16.0\n---\nbody\n")
-      .frontmatter,
-  ).toEqual({});
-  expect(
-    parseFrontmatter("---\nmd2html:\n  mermaid:\n    - 11.16.0\n---\nbody\n")
-      .warnings,
-  ).toEqual(["frontmatter の md2html.mermaid はマッピングでないため無視した"]);
-  expect(
-    parseFrontmatter("---\nmd2html:\n  mermaid:\n    - 11.16.0\n---\nbody\n")
-      .frontmatter,
-  ).toEqual({});
-});
-
-test("md2html.mermaid.version が文字列でなければ警告する", () => {
-  const result = parseFrontmatter(
-    "---\nmd2html:\n  mermaid:\n    version:\n      - 11.16.0\n---\nbody\n",
-  );
-  expect(result.warnings).toEqual([
-    "frontmatter の md2html.mermaid.version は文字列でないため無視した",
-  ]);
-  expect(result.frontmatter).toEqual({});
+test("md2html.mermaid が値付きなら形によらず廃止の警告を出し無視する", () => {
+  for (const yaml of ["mermaid: 11.16.0", "mermaid:\n    - 11.16.0"]) {
+    const result = parseFrontmatter(`---\nmd2html:\n  ${yaml}\n---\nbody\n`);
+    expect(result.warnings).toEqual([MERMAID_DEPRECATED]);
+    expect(result.frontmatter).toEqual({});
+  }
 });
 
 test("md2html.zoomTargets から要素が除外されたら件数を警告する", () => {
@@ -313,4 +274,50 @@ test("閉じ行に `...` も使える", () => {
   const result = parseFrontmatter("---\ntitle: T\n...\n# body\n");
   expect(result.frontmatter.title).toEqual("T");
   expect(result.body).toEqual("# body\n");
+});
+
+test("bodyLineOffset: frontmatter が無ければ 0", () => {
+  expect(parseFrontmatter("# hello\n").bodyLineOffset).toEqual(0);
+});
+
+test("bodyLineOffset: frontmatter ブロック (区切り行を含む) の行数になる", () => {
+  expect(
+    parseFrontmatter("---\ntitle: a\ndescription: b\n---\n# hello\n")
+      .bodyLineOffset,
+  ).toEqual(4);
+  expect(parseFrontmatter("---\n---\n# hello\n").bodyLineOffset).toEqual(2);
+  expect(
+    parseFrontmatter("---\n# only comment\n---\n# hello\n").bodyLineOffset,
+  ).toEqual(3);
+});
+
+test("bodyLineOffset: CRLF でも行数が正しい", () => {
+  expect(
+    parseFrontmatter("---\r\ntitle: a\r\n---\r\n# hello\r\n").bodyLineOffset,
+  ).toEqual(3);
+});
+
+test("bodyLineOffset: BOM 付きでも行数が正しい", () => {
+  expect(
+    parseFrontmatter("\uFEFF---\ntitle: a\n---\nbody\n").bodyLineOffset,
+  ).toEqual(3);
+});
+
+test("bodyLineOffset: マッピングでなく入力をそのまま返す場合は 0", () => {
+  const result = parseFrontmatter("---\nfoo\n---\nbody\n");
+  expect(result.body).toEqual("---\nfoo\n---\nbody\n");
+  expect(result.bodyLineOffset).toEqual(0);
+});
+
+test("md2html.mermaid の値がすべて空のマッピングなら警告しない", () => {
+  for (const yaml of ["mermaid:\n    version:", 'mermaid:\n    version: ""']) {
+    const result = parseFrontmatter(`---\nmd2html:\n  ${yaml}\n---\nbody\n`);
+    expect(result.warnings).toEqual([]);
+  }
+  // 空でない値が 1 つでもあれば警告する。
+  expect(
+    parseFrontmatter(
+      "---\nmd2html:\n  mermaid:\n    version:\n    x: y\n---\nbody\n",
+    ).warnings,
+  ).toEqual([MERMAID_DEPRECATED]);
 });
